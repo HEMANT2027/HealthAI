@@ -92,4 +92,4 @@ function Chatbot() {
   );
 }
 
-export {Chatbot}
+export default Chatbot

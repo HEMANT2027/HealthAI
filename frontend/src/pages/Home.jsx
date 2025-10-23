@@ -28,38 +28,6 @@ function Home() {
       <section className="relative overflow-hidden">
         <div className="absolute inset-0 -z-10 bg-gradient-to-b from-vibrant-blue/10 via-white to-white" />
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
-          <div className="flex justify-between items-center mb-8">
-            <h1 className="text-3xl font-bold text-vibrant-blue">MedicoTourism</h1>
-
-            {/* Login Dropdown */}
-            <div className="relative">
-              <button
-                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                className="px-6 py-3 bg-vibrant-blue text-white rounded-lg font-semibold hover:brightness-105 transition"
-              >
-                Login
-              </button>
-              {isDropdownOpen && (
-                <div className="absolute mt-2 right-0 bg-white border border-gray-200 rounded-lg shadow-lg w-40 z-50">
-                  <Link
-                    to="/login"
-                    className="block px-4 py-2 text-gray-700 hover:bg-gray-100"
-                    onClick={() => setIsDropdownOpen(false)}
-                  >
-                    User Login
-                  </Link>
-                  <Link
-                    to="/admin-login"
-                    className="block px-4 py-2 text-gray-700 hover:bg-gray-100"
-                    onClick={() => setIsDropdownOpen(false)}
-                  >
-                    Admin Login
-                  </Link>
-                </div>
-              )}
-            </div>
-          </div>
-
           <div className="grid lg:grid-cols-2 gap-10 items-center">
             <div>
               <h1 className="text-4xl sm:text-5xl font-extrabold text-gray-900 leading-tight">

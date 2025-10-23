@@ -4,6 +4,7 @@ from pydantic import BaseModel, EmailStr
 from jose import jwt, JWTError
 from passlib.context import CryptContext
 from pymongo import MongoClient
+from pymongo.errors import ServerSelectionTimeoutError
 from datetime import datetime, timedelta
 from typing import Annotated, Optional
 import os
@@ -22,9 +23,35 @@ SECRET_KEY = os.getenv("JWT_SECRET")
 ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = 240
 
-client = MongoClient(os.getenv("MONGODB_KEY"))
-db = client.get_database("medicotourism")
-user_collection = db.get_collection("users")
+# MongoDB Connection with error handling
+try:
+    MONGODB_URI = os.getenv("MONGODB_KEY")
+    if not MONGODB_URI:
+        raise ValueError("MONGODB_KEY environment variable is not set")
+    
+    # Use standard connection string format instead of SRV if having DNS issues
+    # Replace mongodb+srv:// with mongodb:// in your .env if needed
+    client = MongoClient(
+        MONGODB_URI,
+        serverSelectionTimeoutMS=5000,
+        connectTimeoutMS=10000,
+        socketTimeoutMS=10000
+    )
+    
+    # Test the connection
+    client.server_info()
+    print("✅ MongoDB connected successfully")
+    
+    db = client.get_database("medicotourism")
+    user_collection = db.get_collection("users")
+except ServerSelectionTimeoutError as e:
+    print(f"❌ MongoDB connection failed: {e}")
+    print("Please check your MONGODB_KEY in .env file")
+    print("Tip: If using MongoDB Atlas, try replacing 'mongodb+srv://' with 'mongodb://' and use direct connection string")
+    raise
+except Exception as e:
+    print(f"❌ Error connecting to MongoDB: {e}")
+    raise
 
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")

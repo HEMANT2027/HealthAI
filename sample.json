@@ -1,0 +1,98 @@
+[
+  {
+    "_id": "671234567890abcdef123456",
+    "patient": "670abcdef1234567890abcd1",
+    "fullName": "John Smith",
+    "age": 52,
+    "phone": "+1-415-555-1234",
+    "country": "United States",
+    "budget": 18000,
+    "hasSightseeing": "yes",
+    "sightseeingDays": 7,
+    "sightseeingPrefs": ["temples", "historical", "shopping"],
+    "notes": "Osteoarthritis in right knee. On blood pressure medication (Lisinopril 10mg). No known allergies. Prefer travel in December-January. Coming with wife.",
+    "documents": [
+      {
+        "url": "https://your-bucket.s3.amazonaws.com/uploads/patient1/xray-right-knee-2024.jpg",
+        "fileName": "xray-right-knee-2024.jpg",
+        "uploadedAt": "2025-10-18T08:15:30.000Z"
+      },
+      {
+        "url": "https://your-bucket.s3.amazonaws.com/uploads/patient1/mri-report-knee.pdf",
+        "fileName": "mri-report-knee.pdf",
+        "uploadedAt": "2025-10-18T08:16:45.000Z"
+      },
+      {
+        "url": "https://your-bucket.s3.amazonaws.com/uploads/patient1/current-medications.pdf",
+        "fileName": "current-medications.pdf",
+        "uploadedAt": "2025-10-18T08:17:20.000Z"
+      }
+    ],
+    "createdAt": "2025-10-18T08:18:00.000Z",
+    "updatedAt": "2025-10-18T08:18:00.000Z"
+  },
+  {
+    "_id": "671234567890abcdef123457",
+    "patient": "670abcdef1234567890abcd2",
+    "fullName": "Sarah Johnson",
+    "age": 38,
+    "phone": "+44-20-7123-4567",
+    "country": "United Kingdom",
+    "budget": 5000,
+    "hasSightseeing": "no",
+    "sightseeingDays": null,
+    "sightseeingPrefs": [],
+    "notes": "Need 4 dental implants. Allergic to latex and penicillin. No other medical conditions. Tight schedule, want to return within 5 days.",
+    "documents": [
+      {
+        "url": "https://your-bucket.s3.amazonaws.com/uploads/patient2/dental-panoramic-xray.jpg",
+        "fileName": "dental-panoramic-xray.jpg",
+        "uploadedAt": "2025-10-18T09:22:10.000Z"
+      },
+      {
+        "url": "https://your-bucket.s3.amazonaws.com/uploads/patient2/dentist-report-uk.pdf",
+        "fileName": "dentist-report-uk.pdf",
+        "uploadedAt": "2025-10-18T09:23:30.000Z"
+      }
+    ],
+    "createdAt": "2025-10-18T09:24:00.000Z",
+    "updatedAt": "2025-10-18T09:24:00.000Z"
+  },
+  {
+    "_id": "671234567890abcdef123458",
+    "patient": "670abcdef1234567890abcd3",
+    "fullName": "Michael Chen",
+    "age": 61,
+    "phone": "+61-2-8765-4321",
+    "country": "Australia",
+    "budget": 25000,
+    "hasSightseeing": "yes",
+    "sightseeingDays": 14,
+    "sightseeingPrefs": ["temples", "historical", "nature", "museums"],
+    "notes": "Severe coronary artery disease, 70% blockage in LAD. Type 2 diabetes controlled with Metformin. On aspirin and atorvastatin. Non-smoker. Want to combine treatment with spiritual healing experience. Coming with son and daughter-in-law.",
+    "documents": [
+      {
+        "url": "https://your-bucket.s3.amazonaws.com/uploads/patient3/ecg-report-sept-2024.pdf",
+        "fileName": "ecg-report-sept-2024.pdf",
+        "uploadedAt": "2025-10-18T11:05:15.000Z"
+      },
+      {
+        "url": "https://your-bucket.s3.amazonaws.com/uploads/patient3/coronary-angiography.pdf",
+        "fileName": "coronary-angiography.pdf",
+        "uploadedAt": "2025-10-18T11:06:40.000Z"
+      },
+      {
+        "url": "https://your-bucket.s3.amazonaws.com/uploads/patient3/blood-test-results.pdf",
+        "fileName": "blood-test-results.pdf",
+        "uploadedAt": "2025-10-18T11:07:20.000Z"
+      },
+      {
+        "url": "https://your-bucket.s3.amazonaws.com/uploads/patient3/referral-letter-dr-williams.pdf",
+        "fileName": "referral-letter-dr-williams.pdf",
+        "uploadedAt": "2025-10-18T11:08:00.000Z"
+      }
+    ],
+    "createdAt": "2025-10-18T11:09:00.000Z",
+    "updatedAt": "2025-10-18T14:30:00.000Z"
+  }
+]

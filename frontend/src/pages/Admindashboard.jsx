@@ -97,4 +97,4 @@ function AdminDashboard() {
   );
 }
 
-export {AdminDashboard};
+export default AdminDashboard;
