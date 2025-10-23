@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import List, Optional
 import os
 from dotenv import load_dotenv
-from Mongo_connect import get_mongo_connection, upload_file_to_s3
+from Mongo_connect import get_mongo_connection
 from auth import getCurrentUser
 
 load_dotenv()
@@ -15,7 +15,7 @@ router = APIRouter(prefix="/intake", tags=["Intake Form"])
 try:
     mongo_conn = get_mongo_connection()
     db = mongo_conn.get_database()
-    intake_collection = db.get_collection("patients")
+    intake_collection = db.get_collection("intake_forms")
     print("✅ MongoDB connected in intake.py")
 except Exception as e:
     print(f"❌ MongoDB connection failed in intake.py: {e}")
@@ -25,7 +25,6 @@ except Exception as e:
 
 class DocumentInfo(BaseModel):
     url: str
-    s3_key: str
     fileName: str
     uploadedAt: str
 
@@ -40,17 +39,11 @@ class IntakeFormCreate(BaseModel):
     sightseeingPrefs: List[str] = []
     notes: Optional[str] = None
     documents: List[DocumentInfo] = []
-    
     @validator('sightseeingDays')
     def validate_sightseeing_days(cls, v, values):
         if values.get('hasSightseeing') == 'yes' and v is None:
             raise ValueError('Sightseeing days required when sightseeing is enabled')
         return v
-
-class IntakeFormUpdate(BaseModel):
-    status: Optional[str] = Field(None, pattern="^(pending|in_review|contacted|approved|rejected|completed|cancelled)$")
-    staffNotes: Optional[str] = None
-    assignedDoctor: Optional[str] = None
 
 # ---------- Helper Functions ----------
 
@@ -90,32 +83,20 @@ async def submit_intake_form(
     - Associates with logged-in patient
     - Documents already uploaded to S3 via /upload endpoint
     """
-    # Only patients can submit intake forms
-    if current_user.get("role") != "patient":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only patients can submit intake forms"
-        )
-    
     try:
-        from bson import ObjectId
         
-        # Get user's ObjectId
-        user_id = ObjectId(current_user.get("_id"))
-        
-        # Create intake form document matching sample.json structure
-        intake_form = {
-            "patient": user_id,  # Store as ObjectId for reference
+        # Create intake form document
+        intake_doc = {
+            "patient_id": form_data.pseudonym_id,  # Use pseudonym_id to reference the patient
             "fullName": form_data.fullName,
             "age": form_data.age,
             "phone": form_data.phone,
             "country": form_data.country,
             "budget": form_data.budget,
-            "treatmentType": form_data.treatmentType,
             "hasSightseeing": form_data.hasSightseeing,
             "sightseeingDays": form_data.sightseeingDays if form_data.hasSightseeing == "yes" else None,
             "sightseeingPrefs": form_data.sightseeingPrefs if form_data.hasSightseeing == "yes" else [],
-            "notes": form_data.notes or "",
+            "notes": form_data.notes,
             "documents": [
                 {
                     "url": doc.url,
@@ -124,24 +105,27 @@ async def submit_intake_form(
                 }
                 for doc in form_data.documents
             ],
-            "status": "pending",
-            "staffNotes": [],
-            "assignedDoctor": None,
             "createdAt": datetime.utcnow(),
             "updatedAt": datetime.utcnow()
         }
         
         # Insert into MongoDB
-        result = intake_collection.insert_one(intake_form)
-        intake_form["_id"] = result.inserted_id
+        result = intake_collection.insert_one(intake_doc)
+        
+        # Get the inserted document
+        inserted_doc = intake_collection.find_one({"_id": result.inserted_id})
+        
+        print(f"✅ Intake form submitted successfully for patient {form_data.pseudonym_id}: {result.inserted_id}")
         
         return {
             "success": True,
             "message": "Intake form submitted successfully",
-            "form": format_intake_form(intake_form)
+            "formId": str(result.inserted_id),
+            "data": format_intake_form(inserted_doc)
         }
         
     except Exception as e:
+        print(f"❌ Error submitting intake form: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to submit intake form: {str(e)}"
@@ -248,167 +232,3 @@ async def get_intake_form_by_id(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid form ID: {str(e)}"
         )
-
-@router.patch("/forms/{form_id}")
-async def update_intake_form(
-    form_id: str,
-    update_data: IntakeFormUpdate,
-    current_user: dict = Depends(getCurrentUser)
-):
-    """Update intake form (doctors/admins only)"""
-    from bson import ObjectId
-    
-    if current_user.get("role") not in ["doctor", "admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only doctors and admins can update intake forms"
-        )
-    
-    try:
-        update_fields = {"updatedAt": datetime.utcnow()}
-        
-        if update_data.status:
-            update_fields["status"] = update_data.status
-        
-        if update_data.staffNotes:
-            staff_note = {
-                "note": update_data.staffNotes,
-                "addedBy": current_user.get("email"),
-                "addedByRole": current_user.get("role"),
-                "timestamp": datetime.utcnow().isoformat() + "Z"
-            }
-            intake_collection.update_one(
-                {"_id": ObjectId(form_id)},
-                {"$push": {"staffNotes": staff_note}}
-            )
-        
-        if update_data.assignedDoctor and current_user.get("role") == "admin":
-            update_fields["assignedDoctor"] = update_data.assignedDoctor
-        
-        result = intake_collection.update_one(
-            {"_id": ObjectId(form_id)},
-            {"$set": update_fields}
-        )
-        
-        if result.matched_count == 0:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Intake form not found"
-            )
-        
-        updated_form = intake_collection.find_one({"_id": ObjectId(form_id)})
-        
-        return {
-            "success": True,
-            "message": "Intake form updated successfully",
-            "form": format_intake_form(updated_form)
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to update form: {str(e)}"
-        )
-
-@router.delete("/forms/{form_id}")
-async def delete_intake_form(
-    form_id: str,
-    current_user: dict = Depends(getCurrentUser)
-):
-    """Delete intake form with S3 cleanup"""
-    from bson import ObjectId
-    
-    try:
-        form = intake_collection.find_one({"_id": ObjectId(form_id)})
-        
-        if not form:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Intake form not found"
-            )
-        
-        # Access control
-        if current_user.get("role") == "patient":
-            if str(form.get("patient")) != current_user.get("_id"):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="You can only delete your own forms"
-                )
-            if form.get("status") != "pending":
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Cannot delete forms that are in progress"
-                )
-        elif current_user.get("role") != "admin":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only admins can delete forms"
-            )
-        
-        # Delete associated S3 files (if s3_key is stored)
-        # Note: sample.json doesn't include s3_key, but we should store it
-        # For now, skip S3 deletion as URLs are public
-        
-        # Delete form from MongoDB
-        intake_collection.delete_one({"_id": ObjectId(form_id)})
-        
-        return {
-            "success": True,
-            "message": "Intake form deleted successfully"
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to delete form: {str(e)}"
-        )
-
-@router.get("/stats")
-async def get_intake_stats(current_user: dict = Depends(getCurrentUser)):
-    """Get intake form statistics"""
-    if current_user.get("role") not in ["doctor", "admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only doctors and admins can access statistics"
-        )
-    
-    total_forms = intake_collection.count_documents({})
-    pending = intake_collection.count_documents({"status": "pending"})
-    in_review = intake_collection.count_documents({"status": "in_review"})
-    contacted = intake_collection.count_documents({"status": "contacted"})
-    completed = intake_collection.count_documents({"status": "completed"})
-    
-    # Top treatment types
-    pipeline = [
-        {"$group": {"_id": "$treatmentType", "count": {"$sum": 1}}},
-        {"$sort": {"count": -1}},
-        {"$limit": 5}
-    ]
-    top_treatments = list(intake_collection.aggregate(pipeline))
-    
-    # Top countries
-    pipeline = [
-        {"$group": {"_id": "$country", "count": {"$sum": 1}}},
-        {"$sort": {"count": -1}},
-        {"$limit": 5}
-    ]
-    top_countries = list(intake_collection.aggregate(pipeline))
-    
-    return {
-        "success": True,
-        "stats": {
-            "total_forms": total_forms,
-            "by_status": {
-                "pending": pending,
-                "in_review": in_review,
-                "contacted": contacted,
-                "completed": completed
-            },
-            "top_treatments": [{"treatment": t["_id"], "count": t["count"]} for t in top_treatments],
-            "top_countries": [{"country": c["_id"], "count": c["count"]} for c in top_countries]
-        }
-    }

@@ -67,46 +67,55 @@ function IntakeForm() {
     setError('')
   }
 
-  const uploadFilesToS3 = async () => {
-    if (files.length === 0) return []
+  const uploadFilesToS3 = async (files) => {
+    if (!files || files.length === 0) return [];
 
-    setIsUploading(true)
-    setUploadProgress(0)
-    setError('')
+    const formData = new FormData();
+    
+    // Get user data from localStorage
+    const userData = JSON.parse(localStorage.getItem('user') || '{}');
+    console.log(userData);
+    // Append each file
+    files.forEach(file => {
+      formData.append('files', file);
+    });
+    
+    // Append pseudonym_id from user data
+    formData.append('pseudonym_id', userData.pseudonym_id || userData.email || 'GUEST-USER');
+    
+    // Append file_types as comma-separated string (default to 'clinical_notes')
+    const fileTypes = files.map(() => 'clinical_notes').join(',');
+    formData.append('file_types', fileTypes);
 
     try {
-      const formData = new FormData()
-      files.forEach(file => {
-        formData.append('files', file)
-      })
-
-      // Get auth token from localStorage
-      const token = localStorage.getItem('token')
-      
-      const response = await fetch(`${API_BASE_URL}/upload/medical-documents?document_type=intake_form`, {
+      const response = await fetch(`${API_BASE_URL}/files/upload-intake-documents`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
         },
         body: formData
-      })
+      });
 
       if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.detail || 'Failed to upload files')
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Upload failed');
       }
 
-      const data = await response.json()
-      setUploadProgress(100)
-      setUploadedDocuments(data.documents)
-      return data.documents
+      const data = await response.json();
+      
+      if (!data.success) {
+        throw new Error('Upload failed: ' + (data.detail || 'Unknown error'));
+      }
 
-    } catch (err) {
-      console.error('Upload error:', err)
-      setError(err.message || 'Failed to upload files. Please try again.')
-      throw err
-    } finally {
-      setIsUploading(false)
+      // Transform uploaded_files to match DocumentInfo format
+      return data.uploaded_files.map(file => ({
+        url: file.url || file.uri,
+        fileName: file.original_filename,
+        uploadedAt: file.upload_timestamp
+      }));
+    } catch (error) {
+      console.error('Upload error:', error);
+      throw error;
     }
   }
 
@@ -116,13 +125,23 @@ function IntakeForm() {
     setIsSubmitting(true)
 
     try {
+      // Get user data from localStorage
+      const userData = JSON.parse(localStorage.getItem('user') || '{}')
+      
+      // Check if user is a patient on frontend
+      if (userData.role !== 'patient') {
+        throw new Error('Only patients can submit intake forms')
+      }
+
       // Step 1: Upload files to S3 if any
       let documents = []
       if (files.length > 0) {
-        documents = await uploadFilesToS3()
+        setIsUploading(true)
+        documents = await uploadFilesToS3(files)
+        setIsUploading(false)
       }
 
-      // Step 2: Submit form data with document URLs to MongoDB
+      // Step 2: Submit form data with S3 URIs to MongoDB via /intake/submit
       const token = localStorage.getItem('token')
       
       const intakeFormData = {
@@ -135,12 +154,8 @@ function IntakeForm() {
         sightseeingDays: form.hasSightseeing === 'yes' ? parseInt(form.sightseeingDays) : null,
         sightseeingPrefs: form.hasSightseeing === 'yes' ? form.sightseeingPrefs : [],
         notes: form.notes || null,
-        documents: documents.map(doc => ({
-          url: doc.url,
-          s3_key: doc.s3_key,
-          fileName: doc.fileName,
-          uploadedAt: doc.uploadedAt
-        }))
+        documents: documents,  // Array of {url, fileName, uploadedAt}
+        pseudonym_id: userData.pseudonym_id  // Add pseudonym_id from localStorage
       }
 
       const response = await fetch(`${API_BASE_URL}/intake/submit`, {
@@ -158,7 +173,7 @@ function IntakeForm() {
       }
 
       const result = await response.json()
-      console.log('Form submitted successfully:', result)
+      console.log('✅ Form submitted successfully:', result)
 
       // Reset form
       setFiles([])
@@ -178,16 +193,17 @@ function IntakeForm() {
       // Show success modal
       setShowModal(true)
 
-      // Redirect to profile page after 2 seconds
+      // Redirect after 2 seconds
       setTimeout(() => {
         navigate('/profile')
       }, 2000)
 
     } catch (err) {
-      console.error('Submission error:', err)
+      console.error('❌ Submission error:', err)
       setError(err.message || 'Failed to submit form. Please try again.')
     } finally {
       setIsSubmitting(false)
+      setIsUploading(false)
     }
   }
 
@@ -258,7 +274,7 @@ function IntakeForm() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700" htmlFor="country">Country of residence *</label>
+              <label className="block text-sm font-medium text-gray-700" htmlFor="country">Country *</label>
               <input 
                 id="country" 
                 name="country" 
@@ -287,7 +303,7 @@ function IntakeForm() {
 
           <div className="grid md:grid-cols-2 gap-6">
             <div>
-              <label className="block text-sm font-medium text-gray-700">Time for sightseeing after treatment?</label>
+              <label className="block text-sm font-medium text-gray-700">Time for sightseeing?</label>
               <div className="mt-2 flex items-center gap-6">
                 <label className="inline-flex items-center gap-2 cursor-pointer">
                   <input 
@@ -366,11 +382,12 @@ function IntakeForm() {
             />
           </div>
 
+          {/* File Upload Section */}
           <div>
             <label className="block text-sm font-medium text-gray-700">
-              Upload medical documents (X-rays, MRI, prescriptions, reports, etc.)
+              Upload medical documents
             </label>
-            <p className="text-xs text-gray-500 mt-1">Max 10MB per file. Supported: PDF, JPG, PNG, DOC, DOCX</p>
+            <p className="text-xs text-gray-500 mt-1">Max 50MB per file. Supported: PDF, JPG, PNG, DOC, DOCX</p>
             <input 
               type="file" 
               multiple 
@@ -397,7 +414,7 @@ function IntakeForm() {
             {isUploading && (
               <div className="mt-3">
                 <div className="flex items-center justify-between text-sm text-gray-600 mb-1">
-                  <span>Uploading files...</span>
+                  <span>Uploading to S3...</span>
                   <span>{uploadProgress}%</span>
                 </div>
                 <div className="w-full bg-gray-200 rounded-full h-2">
@@ -410,6 +427,7 @@ function IntakeForm() {
             )}
           </div>
 
+          {/* Submit Button */}
           <div className="pt-2 flex gap-4">
             <button 
               type="submit" 
@@ -451,7 +469,7 @@ function IntakeForm() {
             </div>
             <h3 className="mt-4 text-2xl font-bold text-center text-gray-900">Profile Submitted!</h3>
             <p className="mt-2 text-center text-gray-600">
-              Our healthcare team is reviewing your profile. We'll contact you within 24-48 hours with personalized treatment options.
+              Our healthcare team is reviewing your profile. We'll contact you within 24-48 hours.
             </p>
             <div className="mt-6 flex justify-center gap-3">
               <button
@@ -464,16 +482,6 @@ function IntakeForm() {
               >
                 View Profile
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowModal(false)
-                  navigate('/')
-                }}
-                className="px-6 py-2 rounded-lg text-gray-700 font-semibold bg-gray-100 hover:bg-gray-200"
-              >
-                Go Home
-              </button>
             </div>
           </div>
         </div>
@@ -483,5 +491,3 @@ function IntakeForm() {
 }
 
 export default IntakeForm
-
-

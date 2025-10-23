@@ -70,7 +70,7 @@ class User(BaseModel):
     username: str
     email: EmailStr
     hashed_password: str
-    role: str  # "patient" or "doctor"
+    role: str  # "patient", "doctor", or "admin"
     pseudonym_id: str | None = None
     # Doctor-specific fields
     license_id: str | None = None
@@ -84,7 +84,7 @@ class RegisterRequest(BaseModel):
     username: str
     email: EmailStr
     password: str
-    role: str  # "patient" or "doctor"
+    role: str  # "patient" or "doctor" (admin cannot register)
     # Optional doctor fields
     license_id: Optional[str] = None
     specialization: Optional[str] = None
@@ -288,13 +288,13 @@ async def upload_doctor_license(
 # ---------- LOGIN ----------
 @router.post("/login")
 async def loginUser(data: LoginRequest):
-    """Login user (patient or doctor)"""
+    """Login user (patient, doctor, or admin)"""
     
     user = user_collection.find_one({"email": data.email})
     if not user or not verify_password(data.password, user["hashed_password"]):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     
-    # Check if doctor is verified
+    # Check if doctor is verified (but allow admin to login even if not verified)
     if user.get("role") == "doctor" and not user.get("verified", False):
         raise HTTPException(
             status_code=403, 
@@ -345,8 +345,12 @@ async def verify_doctor(
 ):
     """Admin endpoint to verify/reject doctor registration"""
     
-    # Check if current user is admin (you can add admin role check here)
-    # For now, any authenticated user can verify (change this in production)
+    # Check if current user is admin
+    if current_user.get("role") != "admin":
+        raise HTTPException(
+            status_code=403, 
+            detail="Only admins can verify doctors"
+        )
     
     from bson import ObjectId
     result = user_collection.update_one(
@@ -365,7 +369,14 @@ async def verify_doctor(
 # ---------- GET PENDING DOCTORS ----------
 @router.get("/admin/pending-doctors")
 async def get_pending_doctors(current_user: dict = Depends(authMiddleware)):
-    """Get all doctors pending verification"""
+    """Get all doctors pending verification (admin only)"""
+    
+    # Check if current user is admin
+    if current_user.get("role") != "admin":
+        raise HTTPException(
+            status_code=403, 
+            detail="Only admins can view pending doctors"
+        )
     
     doctors = list(user_collection.find({"role": "doctor", "verified": False}))
     

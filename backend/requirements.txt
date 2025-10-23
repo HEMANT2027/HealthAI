@@ -1,6 +1,23 @@
+# FastAPI Framework
 fastapi
-pydantic
-pyjwt
 uvicorn
-dotenv
+
+# Authentication & Security
+python-jose[cryptography]
+passlib[bcrypt]
+bcrypt
+python-multipart
+
+# Data Validation
+pydantic[email]
+email-validator
+
+# MongoDB
 pymongo
+motor
+
+# AWS S3
+boto3
+botocore
+
+dnspython

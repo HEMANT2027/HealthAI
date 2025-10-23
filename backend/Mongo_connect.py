@@ -5,7 +5,13 @@ from datetime import datetime
 import boto3
 from botocore.exceptions import ClientError
 from dotenv import load_dotenv
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
+from typing import List
+import tempfile
+
 load_dotenv()
+
+router = APIRouter(prefix="/files", tags=["File Management"])
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -17,7 +23,7 @@ class MongoDBConnection:
     def __init__(self):
         # Load all config from environment variables
         self.connection_string = os.getenv('MONGODB_KEY')
-        self.db_name = os.getenv('MONGODB_DB_NAME', 'healthcare_ai')
+        self.db_name = os.getenv('MONGODB_DB_NAME', 'medicotourism')
         
         # S3 Configuration
         self.s3_bucket = os.getenv('S3_BUCKET')
@@ -345,78 +351,6 @@ class MongoDBConnection:
             return url
         except Exception as e:
             logger.error(f"❌ Failed to generate presigned URL: {e}")
-            return None
-    
-    def upload_file_to_s3(self, file_path, pseudonym_id, visit_timestamp, file_type):
-        """Upload file to S3 - store only permanent references"""
-        if not self.s3_client:
-            logger.error("❌ S3 client not initialized")
-            return None
-        
-        try:
-            # Validate file
-            if not os.path.exists(file_path):
-                logger.error(f"❌ File not found: {file_path}")
-                return None
-            
-            file_size = os.path.getsize(file_path)
-            max_size = int(os.getenv('MAX_FILE_SIZE_MB', '50')) * 1024 * 1024
-            
-            if file_size > max_size:
-                logger.error(f"❌ File too large: {file_size} bytes")
-                return None
-            
-            # Determine content type
-            ext = os.path.splitext(file_path)[1].lower()
-            content_type_map = {
-                '.pdf': 'application/pdf',
-                '.png': 'image/png',
-                '.jpg': 'image/jpeg',
-                '.jpeg': 'image/jpeg',
-                '.dcm': 'application/dicom',
-                '.tiff': 'image/tiff'
-            }
-            content_type = content_type_map.get(ext, 'application/octet-stream')
-            
-            # Create S3 key (permanent identifier)
-            timestamp_str = visit_timestamp.strftime('%Y%m%d_%H%M%S')
-            filename = os.path.basename(file_path)
-            s3_key = f"patients/{pseudonym_id}/visits/{timestamp_str}/{file_type}/{filename}"
-            
-            # Upload to S3
-            self.s3_client.upload_file(
-                file_path,
-                self.s3_bucket,
-                s3_key,
-                ExtraArgs={
-                    'ServerSideEncryption': 'AES256',
-                    'ContentType': content_type,
-                    'Metadata': {
-                        'pseudonym_id': pseudonym_id,
-                        'visit_timestamp': timestamp_str,
-                        'file_type': file_type,
-                        'uploaded_by': 'healthcare_ai_system',
-                        'upload_date': datetime.utcnow().isoformat()
-                    }
-                }
-            )
-            
-            logger.info(f"✅ Uploaded to S3: s3://{self.s3_bucket}/{s3_key}")
-            
-            # Return only permanent references (NO presigned URL)
-            return {
-                's3_key': s3_key,              # ✅ PERMANENT - store this
-                's3_bucket': self.s3_bucket,   # ✅ PERMANENT - store this
-                's3_region': self.s3_region,   # ✅ PERMANENT - store this
-                'file_size': file_size,
-                'content_type': content_type
-            }
-            
-        except ClientError as e:
-            logger.error(f"❌ S3 upload failed: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"❌ Upload failed: {e}")
             return None
     
     def download_file_from_s3(self, s3_key, local_path):
@@ -892,3 +826,168 @@ def get_mongo_connection():
         _mongo_instance = MongoDBConnection()
         _mongo_instance.connect()
     return _mongo_instance
+
+
+@router.post("/upload-intake-documents")
+async def upload_intake_documents(
+    files: List[UploadFile] = File(...),
+    pseudonym_id: str = Form(...),
+    file_types: str = Form(...)  # Changed from List[str] to str
+):
+    """
+    Upload multiple files to S3 and return S3 references for each file.
+    No MongoDB operations - just S3 upload and metadata return.
+    """
+    try:
+        if not files:
+            raise HTTPException(status_code=400, detail="No files provided")
+        
+        # Parse file_types string (comma-separated) into list
+        file_types_list = [ft.strip() for ft in file_types.split(',')]
+        
+        if len(files) != len(file_types_list):
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Number of files ({len(files)}) must match number of file types ({len(file_types_list)})"
+            )
+        
+        # Get MongoDB connection for S3 client access
+        mongo_conn = get_mongo_connection()
+        
+        if not mongo_conn.s3_client:
+            raise HTTPException(status_code=500, detail="S3 client not initialized")
+        
+        uploaded_files = []
+        failed_files = []
+        
+        for idx, (file, file_type) in enumerate(zip(files, file_types_list)):
+            try:
+                # Validate file type
+                valid_types = ["prescription", "lab_report", "imaging", "clinical_notes"]
+                if file_type not in valid_types:
+                    failed_files.append({
+                        "filename": file.filename,
+                        "error": f"Invalid file type '{file_type}'. Must be one of: {', '.join(valid_types)}"
+                    })
+                    continue
+                
+                # Create temporary file
+                file_ext = os.path.splitext(file.filename)[1]
+                with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as temp_file:
+                    # Write uploaded file to temp location
+                    content = await file.read()
+                    temp_file.write(content)
+                    temp_file_path = temp_file.name
+                
+                try:
+                    # Get file info
+                    file_size = os.path.getsize(temp_file_path)
+                    max_size = int(os.getenv('MAX_FILE_SIZE_MB', '50')) * 1024 * 1024
+                    
+                    if file_size > max_size:
+                        failed_files.append({
+                            "filename": file.filename,
+                            "error": f"File too large ({file_size / (1024*1024):.2f}MB). Max size: {max_size / (1024*1024)}MB"
+                        })
+                        os.unlink(temp_file_path)
+                        continue
+                    
+                    # Determine content type
+                    ext = os.path.splitext(file.filename)[1].lower()
+                    content_type_map = {
+                        '.pdf': 'application/pdf',
+                        '.png': 'image/png',
+                        '.jpg': 'image/jpeg',
+                        '.jpeg': 'image/jpeg',
+                        '.dcm': 'application/dicom',
+                        '.tiff': 'image/tiff',
+                        '.tif': 'image/tiff'
+                    }
+                    content_type = content_type_map.get(ext, file.content_type or 'application/octet-stream')
+                    
+                    # Create S3 key with timestamp
+                    timestamp_str = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+                    safe_filename = file.filename.replace(' ', '_').replace('(', '').replace(')', '')
+                    s3_key = f"patients/{pseudonym_id}/intake/{safe_filename}"
+                    
+                    # Upload to S3
+                    mongo_conn.s3_client.upload_file(
+                        temp_file_path,
+                        mongo_conn.s3_bucket,
+                        s3_key,
+                        ExtraArgs={
+                            'ServerSideEncryption': 'AES256',
+                            'ContentType': content_type,
+                            'Metadata': {
+                                'pseudonym_id': pseudonym_id,
+                                'file_type': file_type,
+                                'original_filename': file.filename,
+                                'uploaded_by': 'intake_form',
+                                'upload_date': datetime.utcnow().isoformat()
+                            }
+                        }
+                    )
+                    
+                    # Generate presigned URL for immediate access
+                    presigned_url = mongo_conn.generate_presigned_url(s3_key, expiration=3600)
+                    
+                    # Generate S3 URI
+                    uri = f"s3://{mongo_conn.s3_bucket}/{s3_key}"
+                    
+                    # Add to successful uploads
+                    uploaded_files.append({
+                        "original_filename": file.filename,
+                        "file_type": file_type,
+                        "s3_key": s3_key,
+                        "s3_bucket": mongo_conn.s3_bucket,
+                        "s3_region": mongo_conn.s3_region,
+                        "uri": uri,
+                        "url": presigned_url,  # Add presigned URL for frontend
+                        "file_size": file_size,
+                        "content_type": content_type,
+                        "upload_timestamp": datetime.utcnow().isoformat()
+                    })
+                    
+                    logger.info(f"✅ Uploaded to S3: {s3_key}")
+                    
+                finally:
+                    # Clean up temp file
+                    if os.path.exists(temp_file_path):
+                        os.unlink(temp_file_path)
+                        
+            except Exception as e:
+                logger.error(f"❌ Failed to upload {file.filename}: {e}")
+                failed_files.append({
+                    "filename": file.filename,
+                    "error": str(e)
+                })
+        
+        # Return response
+        response = {
+            "success": len(uploaded_files) > 0,
+            "total_files": len(files),
+            "uploaded_count": len(uploaded_files),
+            "failed_count": len(failed_files),
+            "uploaded_files": uploaded_files
+        }
+        
+        if failed_files:
+            response["failed_files"] = failed_files
+        
+        if len(uploaded_files) == 0:
+            raise HTTPException(
+                status_code=500,
+                detail="All file uploads failed. See failed_files for details.",
+                headers={"X-Failed-Files": str(failed_files)}
+            )
+        
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Upload endpoint error: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Upload failed: {str(e)}"
+        )

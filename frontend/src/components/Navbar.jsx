@@ -70,26 +70,55 @@ function Navbar() {
             Home
           </NavLink>
           
-          <NavLink 
-            to="/intake" 
-            className={({isActive}) => `transition-colors ${isActive ? 'text-vibrant-blue' : 'text-gray-700 hover:text-vibrant-orange'}`}
-          >
-            Register Form
-          </NavLink>
+          {/* Patient-only navigation */}
+          {isAuthenticated && user?.role === 'patient' && (
+            <>
+              <NavLink 
+                to="/intake" 
+                className={({isActive}) => `transition-colors ${isActive ? 'text-vibrant-blue' : 'text-gray-700 hover:text-vibrant-orange'}`}
+              >
+                Medical Form
+              </NavLink>
+              
+              <NavLink 
+                to="/profile" 
+                className={({isActive}) => `transition-colors ${isActive ? 'text-vibrant-blue' : 'text-gray-700 hover:text-vibrant-orange'}`}
+              >
+                Profile
+              </NavLink>
+            </>
+          )}
           
-          <NavLink 
-            to="/profile" 
-            className={({isActive}) => `transition-colors ${isActive ? 'text-vibrant-blue' : 'text-gray-700 hover:text-vibrant-orange'}`}
-          >
-            Profile
-          </NavLink>
+          {/* Doctor-only navigation */}
+          {isAuthenticated && user?.role === 'doctor' && (
+            <>
+              <NavLink 
+                to="/doctor" 
+                className={({isActive}) => `transition-colors ${isActive ? 'text-vibrant-blue' : 'text-gray-700 hover:text-vibrant-orange'}`}
+              >
+                Doctor Panel
+              </NavLink>
+              
+              <NavLink 
+                to="/reports" 
+                className={({isActive}) => `transition-colors ${isActive ? 'text-vibrant-blue' : 'text-gray-700 hover:text-vibrant-orange'}`}
+              >
+                Reports
+              </NavLink>
+            </>
+          )}
           
-          <NavLink 
-            to="/doctor" 
-            className={({isActive}) => `transition-colors ${isActive ? 'text-vibrant-blue' : 'text-gray-700 hover:text-vibrant-orange'}`}
-          >
-            Doctor Panel
-          </NavLink>
+          {/* Admin-only navigation */}
+          {isAuthenticated && user?.role === 'admin' && (
+            <>
+              <NavLink 
+                to="/admin" 
+                className={({isActive}) => `transition-colors ${isActive ? 'text-vibrant-blue' : 'text-gray-700 hover:text-vibrant-orange'}`}
+              >
+                Admin Dashboard
+              </NavLink>
+            </>
+          )}
         </nav>
 
         <div>
