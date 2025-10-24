@@ -29,6 +29,7 @@ class DocumentInfo(BaseModel):
     uploadedAt: str
 
 class IntakeFormCreate(BaseModel):
+    pseudonym_id: str = Field(...)
     fullName: str = Field(..., min_length=2, max_length=100)
     age: int = Field(..., ge=1, le=120)
     phone: str = Field(..., min_length=10, max_length=20)

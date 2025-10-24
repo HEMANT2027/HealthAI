@@ -74,7 +74,7 @@ function IntakeForm() {
     
     // Get user data from localStorage
     const userData = JSON.parse(localStorage.getItem('user') || '{}');
-    console.log(userData);
+    console.log(userData.pseudonym_id);
     // Append each file
     files.forEach(file => {
       formData.append('files', file);

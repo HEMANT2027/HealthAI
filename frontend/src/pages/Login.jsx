@@ -40,13 +40,7 @@ function Login() {
         
         setSuccessMessage("Login successful!");
         setTimeout(() => {
-          if (data.user.role === 'admin') {
-            navigate('/doctor/pending-verification');
-          } else if (data.user.role === 'doctor' && data.user.verified) {
-            navigate('/doctor');
-          } else {
             navigate('/');
-          }
         }, 2000);
       } else {
         const errorMsg = typeof data.detail === 'string' 

@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from google.cloud import vision
 import google.generativeai as genai
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Body
 
 router = APIRouter(prefix="/ocr", tags=["OCR_NER"])
 

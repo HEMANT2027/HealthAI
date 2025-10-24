@@ -10,8 +10,6 @@ from typing import Annotated, Optional
 import os
 import dotenv
 import secrets
-import boto3
-from botocore.exceptions import ClientError
 
 dotenv.load_dotenv()
 
@@ -55,15 +53,6 @@ except Exception as e:
 
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
-
-# AWS S3 Configuration
-s3_client = boto3.client(
-    's3',
-    aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-    aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-    region_name=os.getenv("AWS_REGION", "us-east-1")
-)
-S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
 
 # ---------- User Schema ----------
 class User(BaseModel):
@@ -113,38 +102,6 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-def upload_file_to_s3(file: UploadFile, folder: str = "doctor-licenses") -> str:
-    """Upload file to S3 and return the public URL"""
-    try:
-        file_extension = file.filename.split('.')[-1]
-        unique_filename = f"{folder}/{secrets.token_hex(16)}.{file_extension}"
-        
-        s3_client.upload_fileobj(
-            file.file,
-            S3_BUCKET_NAME,
-            unique_filename,
-            ExtraArgs={
-                'ContentType': file.content_type,
-                'ACL': 'public-read'
-            }
-        )
-        
-        file_url = f"https://{S3_BUCKET_NAME}.s3.{os.getenv('AWS_REGION', 'us-east-1')}.amazonaws.com/{unique_filename}"
-        return file_url
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error uploading file: {str(e)}")
-
-def verify_medical_license(license_id: str) -> bool:
-    """
-    Placeholder function for medical license verification
-    In production, integrate with:
-    - India: NMC API
-    - US: NPI Registry
-    - UK: GMC API
-    """
-    # For now, just check if license_id is not empty
-    # Replace with actual API call in production
-    return bool(license_id and len(license_id) >= 5)
 
 # ---------- Auth Middleware ----------
 async def authMiddleware(token: Annotated[str, Depends(oauth2_scheme)]):
@@ -197,11 +154,7 @@ async def registerUser(data: RegisterRequest):
             raise HTTPException(status_code=400, detail="Specialization is required for doctors")
         if not data.hospital:
             raise HTTPException(status_code=400, detail="Hospital/Clinic name is required for doctors")
-        
-        # Verify medical license (placeholder - integrate real API)
-        if not verify_medical_license(data.license_id):
-            raise HTTPException(status_code=400, detail="Invalid medical license ID")
-    
+            
     hashed_pw = hash_password(data.password)
     pseudonym_id = generate_pseudonym_id()
     
@@ -250,39 +203,6 @@ async def registerUser(data: RegisterRequest):
             "verified": new_user["verified"],
             "pseudonym_id": new_user["pseudonym_id"]
         }
-    }
-
-# ---------- UPLOAD DOCTOR LICENSE ----------
-@router.post("/upload-license")
-async def upload_doctor_license(
-    file: UploadFile = File(...),
-    current_user: dict = Depends(authMiddleware)
-):
-    """Upload doctor's medical license document"""
-    
-    if current_user.get("role") != "doctor":
-        raise HTTPException(status_code=403, detail="Only doctors can upload license documents")
-    
-    # Validate file type
-    allowed_extensions = ['pdf', 'jpg', 'jpeg', 'png']
-    file_extension = file.filename.split('.')[-1].lower()
-    if file_extension not in allowed_extensions:
-        raise HTTPException(status_code=400, detail=f"File type not allowed. Allowed: {', '.join(allowed_extensions)}")
-    
-    # Upload to S3
-    file_url = upload_file_to_s3(file, folder="doctor-licenses")
-    
-    # Update user document
-    from bson import ObjectId
-    user_collection.update_one(
-        {"_id": ObjectId(current_user["id"])},
-        {"$set": {"license_document_url": file_url}}
-    )
-    
-    return {
-        "success": True,
-        "message": "License document uploaded successfully",
-        "document_url": file_url
     }
 
 # ---------- LOGIN ----------
@@ -334,61 +254,6 @@ async def getCurrentUser(current_user: dict = Depends(authMiddleware)):
     return {
         "success": True,
         "user": current_user
-    }
-
-# ---------- ADMIN: VERIFY DOCTOR ----------
-@router.patch("/admin/verify-doctor/{user_id}")
-async def verify_doctor(
-    user_id: str,
-    verified: bool,
-    current_user: dict = Depends(authMiddleware)
-):
-    """Admin endpoint to verify/reject doctor registration"""
-    
-    # Check if current user is admin
-    if current_user.get("role") != "admin":
-        raise HTTPException(
-            status_code=403, 
-            detail="Only admins can verify doctors"
-        )
-    
-    from bson import ObjectId
-    result = user_collection.update_one(
-        {"_id": ObjectId(user_id), "role": "doctor"},
-        {"$set": {"verified": verified, "verified_at": datetime.utcnow()}}
-    )
-    
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Doctor not found")
-    
-    return {
-        "success": True,
-        "message": f"Doctor {'verified' if verified else 'rejected'} successfully"
-    }
-
-# ---------- GET PENDING DOCTORS ----------
-@router.get("/admin/pending-doctors")
-async def get_pending_doctors(current_user: dict = Depends(authMiddleware)):
-    """Get all doctors pending verification (admin only)"""
-    
-    # Check if current user is admin
-    if current_user.get("role") != "admin":
-        raise HTTPException(
-            status_code=403, 
-            detail="Only admins can view pending doctors"
-        )
-    
-    doctors = list(user_collection.find({"role": "doctor", "verified": False}))
-    
-    for doctor in doctors:
-        doctor["id"] = str(doctor["_id"])
-        del doctor["_id"]
-        del doctor["hashed_password"]
-    
-    return {
-        "success": True,
-        "count": len(doctors),
-        "doctors": doctors
     }
 
 # Mount router

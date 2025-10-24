@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from auth import router as auth_router
 from intake import router as intake_router
 from Mongo_connect import router as mongo_router
+from admin import router as admin_router
 # from ocr_ner import router as ocr_router
 import uvicorn
 
@@ -21,6 +22,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(intake_router)
 app.include_router(mongo_router)
+app.include_router(admin_router)
 # app.include_router(ocr_router)
 
 @app.get("/")
