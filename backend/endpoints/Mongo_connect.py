@@ -38,7 +38,7 @@ class MongoDBConnection:
         self.database = None
         self.s3_client = None
         self.is_connected = False
-    
+
     def _validate_config(self):
         """Validate all required configuration is present"""
         required_vars = {
@@ -373,6 +373,19 @@ class MongoDBConnection:
             logger.error(f"❌ S3 deletion failed: {e}")
             return False
     
+    def get_s3_http_url(self, s3_key):
+        """
+        Return stable HTTP URL for an S3 object (virtual-hosted style).
+        Example: https://{bucket}.s3.{region}.amazonaws.com/{key}
+        For us-east-1 use the regional-less endpoint.
+        """
+        bucket = self.s3_bucket
+        region = (self.s3_region or "").strip()
+        # handle older us-east-1 endpoint variant
+        if region in ("", "us-east-1"):
+            return f"https://{bucket}.s3.amazonaws.com/{s3_key}"
+        return f"https://{bucket}.s3.{region}.amazonaws.com/{s3_key}"
+
     # ==================== PATIENT & VISIT OPERATIONS ====================
     
     def create_patient_record(self, pseudonym_id, clinician_id, 
@@ -501,6 +514,10 @@ class MongoDBConnection:
             if not s3_result:
                 return None
             
+            s3_key = s3_result.get('s3_key')
+            # Construct http URL (permanent, non-presigned)
+            http_url = self.get_s3_http_url(s3_key) if s3_key else None
+
             # Create ingest object with ONLY permanent data
             ingest_obj = {
                 "ingest_id": ingest_id,
@@ -508,6 +525,7 @@ class MongoDBConnection:
                 "s3_key": s3_result['s3_key'],           # ✅ Permanent reference
                 "s3_bucket": s3_result['s3_bucket'],     # ✅ Permanent reference
                 "s3_region": s3_result['s3_region'],     # ✅ Permanent reference
+                "http_url": http_url,                    # ✅ Permanent HTTP URL (non-presigned)
                 "upload_timestamp": datetime.utcnow(),
                 "original_filename": os.path.basename(file_path),
                 "file_size": s3_result['file_size'],
@@ -832,11 +850,12 @@ def get_mongo_connection():
 async def upload_intake_documents(
     files: List[UploadFile] = File(...),
     pseudonym_id: str = Form(...),
-    file_types: str = Form(...)  # Changed from List[str] to str
+    file_types: str = Form(...)  # Comma-separated string of file types
 ):
     """
     Upload multiple files to S3 and return S3 references for each file.
-    No MongoDB operations - just S3 upload and metadata return.
+    Supports different file types: prescription, pathology, scan.
+    Files are stored in organized folders in S3 based on type.
     """
     try:
         if not files:
@@ -862,8 +881,8 @@ async def upload_intake_documents(
         
         for idx, (file, file_type) in enumerate(zip(files, file_types_list)):
             try:
-                # Validate file type
-                valid_types = ["prescription", "lab_report", "imaging", "clinical_notes"]
+                # Validate file type - accept new types for intake forms
+                valid_types = ["prescription", "pathology", "scan", "lab_report", "imaging", "clinical_notes"]
                 if file_type not in valid_types:
                     failed_files.append({
                         "filename": file.filename,
@@ -908,7 +927,7 @@ async def upload_intake_documents(
                     # Create S3 key with timestamp
                     timestamp_str = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
                     safe_filename = file.filename.replace(' ', '_').replace('(', '').replace(')', '')
-                    s3_key = f"patients/{pseudonym_id}/intake/{safe_filename}"
+                    s3_key = f"patients/{pseudonym_id}/intake/{file_type}/{timestamp_str}_{safe_filename}"
                     
                     # Upload to S3
                     mongo_conn.s3_client.upload_file(
@@ -934,6 +953,9 @@ async def upload_intake_documents(
                     # Generate S3 URI
                     uri = f"s3://{mongo_conn.s3_bucket}/{s3_key}"
                     
+                    # Permanent HTTP URL (non-presigned) stored in DB in requested format
+                    http_url = mongo_conn.get_s3_http_url(s3_key)
+                    
                     # Add to successful uploads
                     uploaded_files.append({
                         "original_filename": file.filename,
@@ -942,7 +964,8 @@ async def upload_intake_documents(
                         "s3_bucket": mongo_conn.s3_bucket,
                         "s3_region": mongo_conn.s3_region,
                         "uri": uri,
-                        "url": presigned_url,  # Add presigned URL for frontend
+                        "url": presigned_url,  # presigned URL for frontend immediate access
+                        "http_url": http_url,  # permanent HTTP URL to store in MongoDB (non-presigned)
                         "file_size": file_size,
                         "content_type": content_type,
                         "upload_timestamp": datetime.utcnow().isoformat()

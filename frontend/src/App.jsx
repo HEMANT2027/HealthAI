@@ -7,10 +7,11 @@ import IntakeForm from './pages/IntakeForm'
 import Navbar from './components/Navbar'
 import Footer from './components/Footer'
 import DoctorPanel from './pages/DoctorPanel'
-import Reports from './pages/Reports'
+import Report from './pages/Report'
 import Profile from './pages/Profile'
 import Chatbot from './pages/Chatbot'
 import  AdminDashboard  from './pages/Admindashboard'
+import Test from './pages/test'
 
 // Protected Route Component
 function ProtectedRoute({ children, allowedRoles }) {
@@ -119,7 +120,7 @@ function App() {
       <Routes>
         <Route element={<Layout />}>
           <Route path="/" element={<Home />} />
-          
+          <Route path="/test" element={<Test/>} />
           {/* Patient Only Routes */}
           <Route 
             path="/intake" 
@@ -130,33 +131,33 @@ function App() {
             } 
           />
           <Route 
-            path="/profile" 
+            path="/profile/:id" 
             element={
-              <ProtectedRoute allowedRoles={['patient']}>
+              <ProtectedRoute allowedRoles={['patient','doctor','admin']}>
                 <Profile />
               </ProtectedRoute>
             } 
           />
           
-          {/* Doctor Only Routes */}
-          <Route 
-            path="/doctor" 
-            element={
-              <ProtectedRoute allowedRoles={['doctor']}>
-                <DoctorPanel />
-              </ProtectedRoute>
-            } 
-          />
-          <Route 
-            path="/reports" 
-            element={
-              <ProtectedRoute allowedRoles={['doctor']}>
-                <Reports />
-              </ProtectedRoute>
-            } 
-          />
-          
-          {/* Admin Only Routes */}
+          /* Doctor Only Routes */
+                <Route 
+                path="/doctor" 
+                element={
+                  <ProtectedRoute allowedRoles={['doctor']}>
+                  <DoctorPanel />
+                  </ProtectedRoute>
+                } 
+                />
+                <Route 
+                path="/reports/:patientId" 
+                element={
+                  <ProtectedRoute allowedRoles={['doctor']}>
+                  <Report />
+                  </ProtectedRoute>
+                } 
+                />
+                
+                {/* Admin Only Routes */}
           <Route 
             path="/admin" 
             element={
@@ -168,7 +169,7 @@ function App() {
           
           {/* Chatbot - accessible to all authenticated users */}
           <Route 
-            path="/chatbot" 
+            path="/chatbot/:id" 
             element={
               <ProtectedRoute>
                 <Chatbot />

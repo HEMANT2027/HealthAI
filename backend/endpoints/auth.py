@@ -92,8 +92,13 @@ def hash_password(password: str) -> str:
         password = password[:72]
     return pwd_context.hash(password)
 
-def generate_pseudonym_id() -> str:
-    return f"P-{secrets.token_hex(8).upper()}"
+def generate_pseudonym_id(role: str) -> str:
+    """Generate a unique pseudonym ID based on role matching P-XXXX-XXXX format"""
+    prefix = "P" if role == "patient" else "D" if role == "doctor" else "A"
+    # Generate 4-character segments to match the schema pattern P-XXXX-XXXX
+    part1 = secrets.token_hex(2).upper()  # 4 hex characters
+    part2 = secrets.token_hex(2).upper()  # 4 hex characters
+    return f"{prefix}-{part1}-{part2}"
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None):
     to_encode = data.copy()
@@ -156,7 +161,7 @@ async def registerUser(data: RegisterRequest):
             raise HTTPException(status_code=400, detail="Hospital/Clinic name is required for doctors")
             
     hashed_pw = hash_password(data.password)
-    pseudonym_id = generate_pseudonym_id()
+    pseudonym_id = generate_pseudonym_id(data.role)
     
     new_user = {
         "username": data.username,

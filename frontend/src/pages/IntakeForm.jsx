@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 
 function IntakeForm() {
   const navigate = useNavigate()
+  const [step, setStep] = useState(0) // NEW: two-step flow
   const [form, setForm] = useState({
     fullName: '',
     age: '',
@@ -14,7 +15,9 @@ function IntakeForm() {
     sightseeingPrefs: [],
     notes: '',
   })
-  const [files, setFiles] = useState([])
+  const [prescriptionFile, setPrescriptionFile] = useState(null)
+  const [pathologyFile, setPathologyFile] = useState(null)
+  const [scanFiles, setScanFiles] = useState([]) // multiple scans allowed
   const [uploadedDocuments, setUploadedDocuments] = useState([])
   const [showModal, setShowModal] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
@@ -51,40 +54,76 @@ function IntakeForm() {
     })
   }
 
-  const handleFiles = (e) => {
-    const selectedFiles = Array.from(e.target.files || [])
+  // File type validation helper
+  const isValidFileType = (filename) => {
+    const ext = filename.toLowerCase().split('.').pop()
+    const allowedTypes = ['pdf', 'jpg', 'jpeg', 'png', 'doc', 'docx', 'dcm','tiff']
+    return allowedTypes.includes(ext)
+  }
+
+  // NEW: file-specific handlers with type validation
+  const handlePrescriptionFile = (e) => {
+    const f = e.target.files?.[0] || null
+    if (!f) return
+    if (f.size > 50 * 1024 * 1024) { 
+      setError('Prescription file too large (max 50MB)')
+      return 
+    }
+    if (!isValidFileType(f.name)) {
+      setError('Invalid file type. Please upload PDF, JPG, PNG, DOC, or DOCX files')
+      return
+    }
+    setPrescriptionFile(f)
+    setError('')
+  }
+  
+  const handlePathologyFile = (e) => {
+    const f = e.target.files?.[0] || null
+    if (!f) return
+    if (f.size > 50 * 1024 * 1024) { 
+      setError('Pathology file too large (max 50MB)')
+      return 
+    }
+    if (!isValidFileType(f.name)) {
+      setError('Invalid file type. Please upload PDF, JPG, PNG, DOC, or DOCX files')
+      return
+    }
+    setPathologyFile(f)
+    setError('')
+  }
+  
+  const handleScanFiles = (e) => {
+    const selected = Array.from(e.target.files || [])
+    if (selected.length === 0) return
     
-    // Validate file size (max 10MB per file)
-    const validFiles = selectedFiles.filter(file => {
-      if (file.size > 10 * 1024 * 1024) {
-        setError(`File ${file.name} is too large (max 10MB)`)
-        return false
-      }
-      return true
-    })
+    // Validate file types
+    const invalidTypes = selected.filter(f => !isValidFileType(f.name))
+    if (invalidTypes.length > 0) {
+      setError(`Invalid file types: ${invalidTypes.map(f => f.name).join(', ')}. Please upload PDF, JPG, PNG, or DICOM files`)
+      return
+    }
     
-    setFiles(validFiles)
+    const tooLarge = selected.find(f => f.size > 50 * 1024 * 1024)
+    if (tooLarge) { 
+      setError(`File ${tooLarge.name} is too large (max 50MB)`)
+      return 
+    }
+    setScanFiles(selected)
     setError('')
   }
 
-  const uploadFilesToS3 = async (files) => {
+  // UPDATED: accept explicit types array
+  const uploadFilesToS3 = async (files, types) => {
     if (!files || files.length === 0) return [];
 
     const formData = new FormData();
-    
-    // Get user data from localStorage
     const userData = JSON.parse(localStorage.getItem('user') || '{}');
-    console.log(userData.pseudonym_id);
-    // Append each file
-    files.forEach(file => {
-      formData.append('files', file);
-    });
-    
-    // Append pseudonym_id from user data
+
+    files.forEach(file => formData.append('files', file));
     formData.append('pseudonym_id', userData.pseudonym_id || userData.email || 'GUEST-USER');
-    
-    // Append file_types as comma-separated string (default to 'clinical_notes')
-    const fileTypes = files.map(() => 'clinical_notes').join(',');
+
+    // file types must be comma separated and correspond to files order
+    const fileTypes = (types || files.map(() => 'clinical_notes')).join(',');
     formData.append('file_types', fileTypes);
 
     try {
@@ -102,16 +141,16 @@ function IntakeForm() {
       }
 
       const data = await response.json();
-      
+
       if (!data.success) {
         throw new Error('Upload failed: ' + (data.detail || 'Unknown error'));
       }
 
-      // Transform uploaded_files to match DocumentInfo format
       return data.uploaded_files.map(file => ({
         url: file.url || file.uri,
         fileName: file.original_filename,
-        uploadedAt: file.upload_timestamp
+        uploadedAt: file.upload_timestamp,
+        type: file.file_type || 'clinical_notes' // Include file type
       }));
     } catch (error) {
       console.error('Upload error:', error);
@@ -119,31 +158,57 @@ function IntakeForm() {
     }
   }
 
+  const validateStep1 = () => {
+    if (!form.fullName || !form.age || !form.phone || !form.country || form.budget === '') {
+      setError('Please fill required fields before proceeding.')
+      return false
+    }
+    if (form.hasSightseeing === 'yes' && (!form.sightseeingDays || parseInt(form.sightseeingDays) < 1)) {
+      setError('Please provide sightseeing days.')
+      return false
+    }
+    return true
+  }
+
   const handleSubmit = async (e) => {
-    e.preventDefault()
+    e?.preventDefault()
     setError('')
-    setIsSubmitting(true)
 
     try {
-      // Get user data from localStorage
       const userData = JSON.parse(localStorage.getItem('user') || '{}')
-      
-      // Check if user is a patient on frontend
       if (userData.role !== 'patient') {
         throw new Error('Only patients can submit intake forms')
       }
 
-      // Step 1: Upload files to S3 if any
+      // Step 1 -> move to step 2
+      if (step === 0) {
+        if (!validateStep1()) return
+        setStep(1)
+        return
+      }
+
+      // Step 2 -> final submit
+      setIsSubmitting(true)
+
+      // prepare file list and types in order
+      const filesToUpload = []
+      const types = []
+      if (prescriptionFile) { filesToUpload.push(prescriptionFile); types.push('prescription') }
+      if (pathologyFile) { filesToUpload.push(pathologyFile); types.push('pathology') }
+      if (scanFiles && scanFiles.length > 0) {
+        scanFiles.forEach(f => { filesToUpload.push(f); types.push('scan') })
+      }
+
       let documents = []
-      if (files.length > 0) {
+      if (filesToUpload.length > 0) {
         setIsUploading(true)
-        documents = await uploadFilesToS3(files)
+        const uploaded = await uploadFilesToS3(filesToUpload, types)
+        documents = uploaded.map(u => ({ url: u.url, fileName: u.fileName, uploadedAt: u.uploadedAt, type: u.type }))
         setIsUploading(false)
       }
 
-      // Step 2: Submit form data with S3 URIs to MongoDB via /intake/submit
+      // Form payload
       const token = localStorage.getItem('token')
-      
       const intakeFormData = {
         fullName: form.fullName,
         age: parseInt(form.age),
@@ -154,8 +219,8 @@ function IntakeForm() {
         sightseeingDays: form.hasSightseeing === 'yes' ? parseInt(form.sightseeingDays) : null,
         sightseeingPrefs: form.hasSightseeing === 'yes' ? form.sightseeingPrefs : [],
         notes: form.notes || null,
-        documents: documents,  // Array of {url, fileName, uploadedAt}
-        pseudonym_id: userData.pseudonym_id  // Add pseudonym_id from localStorage
+        documents: documents,
+        pseudonym_id: userData.pseudonym_id
       }
 
       const response = await fetch(`${API_BASE_URL}/intake/submit`, {
@@ -175,8 +240,11 @@ function IntakeForm() {
       const result = await response.json()
       console.log('✅ Form submitted successfully:', result)
 
-      // Reset form
-      setFiles([])
+      // Reset
+      setStep(0)
+      setPrescriptionFile(null)
+      setPathologyFile(null)
+      setScanFiles([])
       setUploadedDocuments([])
       setForm({
         fullName: '',
@@ -190,13 +258,8 @@ function IntakeForm() {
         notes: '',
       })
 
-      // Show success modal
       setShowModal(true)
-
-      // Redirect after 2 seconds
-      setTimeout(() => {
-        navigate('/profile')
-      }, 2000)
+      setTimeout(() => navigate('/profile'), 2000)
 
     } catch (err) {
       console.error('❌ Submission error:', err)
@@ -233,225 +296,250 @@ function IntakeForm() {
         )}
 
         <form onSubmit={handleSubmit} className="mt-8 space-y-6">
-          <div className="grid md:grid-cols-2 gap-6">
-            <div>
-              <label className="block text-sm font-medium text-gray-700" htmlFor="fullName">Full name *</label>
-              <input 
-                id="fullName" 
-                name="fullName" 
-                type="text" 
-                value={form.fullName} 
-                onChange={handleChange}
-                className="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-vibrant-blue focus:border-vibrant-blue transition-all duration-200 hover:border-gray-400" 
-                required 
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700" htmlFor="age">Age *</label>
-              <input 
-                id="age" 
-                name="age" 
-                type="number" 
-                min="1" 
-                max="120"
-                value={form.age} 
-                onChange={handleChange}
-                className="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-vibrant-blue focus:border-vibrant-blue transition-all duration-200 hover:border-gray-400" 
-                required 
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700" htmlFor="phone">Phone number *</label>
-              <input 
-                id="phone" 
-                name="phone" 
-                type="tel" 
-                value={form.phone} 
-                onChange={handleChange}
-                placeholder="+1-234-567-8900"
-                className="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-vibrant-blue focus:border-vibrant-blue transition-all duration-200 hover:border-gray-400" 
-                required 
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700" htmlFor="country">Country *</label>
-              <input 
-                id="country" 
-                name="country" 
-                type="text" 
-                value={form.country} 
-                onChange={handleChange}
-                className="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-vibrant-blue focus:border-vibrant-blue transition-all duration-200 hover:border-gray-400" 
-                required 
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700" htmlFor="budget">Budget (USD) *</label>
-              <input 
-                id="budget" 
-                name="budget" 
-                type="number" 
-                min="0" 
-                step="0.01"
-                value={form.budget} 
-                onChange={handleChange}
-                className="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-vibrant-blue focus:border-vibrant-blue transition-all duration-200 hover:border-gray-400" 
-                required 
-              />
-            </div>
-          </div>
-
-          <div className="grid md:grid-cols-2 gap-6">
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Time for sightseeing?</label>
-              <div className="mt-2 flex items-center gap-6">
-                <label className="inline-flex items-center gap-2 cursor-pointer">
+          {step === 0 && (
+            <>
+              <div className="grid md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700" htmlFor="fullName">Full name *</label>
                   <input 
-                    type="radio" 
-                    name="hasSightseeing" 
-                    value="yes" 
-                    checked={form.hasSightseeing==='yes'} 
+                    id="fullName" 
+                    name="fullName" 
+                    type="text" 
+                    value={form.fullName} 
                     onChange={handleChange}
-                    className="w-4 h-4 text-vibrant-blue focus:ring-vibrant-blue" 
+                    className="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-vibrant-blue focus:border-vibrant-blue transition-all duration-200 hover:border-gray-400" 
+                    required 
                   />
-                  <span>Yes</span>
-                </label>
-                <label className="inline-flex items-center gap-2 cursor-pointer">
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700" htmlFor="age">Age *</label>
                   <input 
-                    type="radio" 
-                    name="hasSightseeing" 
-                    value="no" 
-                    checked={form.hasSightseeing==='no'} 
+                    id="age" 
+                    name="age" 
+                    type="number" 
+                    min="1" 
+                    max="120"
+                    value={form.age} 
                     onChange={handleChange}
-                    className="w-4 h-4 text-vibrant-blue focus:ring-vibrant-blue" 
+                    className="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-vibrant-blue focus:border-vibrant-blue transition-all duration-200 hover:border-gray-400" 
+                    required 
                   />
-                  <span>No</span>
-                </label>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700" htmlFor="phone">Phone number *</label>
+                  <input 
+                    id="phone" 
+                    name="phone" 
+                    type="tel" 
+                    value={form.phone} 
+                    onChange={handleChange}
+                    placeholder="+1-234-567-8900"
+                    className="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-vibrant-blue focus:border-vibrant-blue transition-all duration-200 hover:border-gray-400" 
+                    required 
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700" htmlFor="country">Country *</label>
+                  <input 
+                    id="country" 
+                    name="country" 
+                    type="text" 
+                    value={form.country} 
+                    onChange={handleChange}
+                    className="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-vibrant-blue focus:border-vibrant-blue transition-all duration-200 hover:border-gray-400" 
+                    required 
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700" htmlFor="budget">Budget (USD) *</label>
+                  <input 
+                    id="budget" 
+                    name="budget" 
+                    type="number" 
+                    min="0" 
+                    step="0.01"
+                    value={form.budget} 
+                    onChange={handleChange}
+                    className="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-vibrant-blue focus:border-vibrant-blue transition-all duration-200 hover:border-gray-400" 
+                    required 
+                  />
+                </div>
               </div>
-            </div>
-            {form.hasSightseeing === 'yes' && (
+
+              <div className="grid md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Time for sightseeing?</label>
+                  <div className="mt-2 flex items-center gap-6">
+                    <label className="inline-flex items-center gap-2 cursor-pointer">
+                      <input 
+                        type="radio" 
+                        name="hasSightseeing" 
+                        value="yes" 
+                        checked={form.hasSightseeing==='yes'} 
+                        onChange={handleChange}
+                        className="w-4 h-4 text-vibrant-blue focus:ring-vibrant-blue" 
+                      />
+                      <span>Yes</span>
+                    </label>
+                    <label className="inline-flex items-center gap-2 cursor-pointer">
+                      <input 
+                        type="radio" 
+                        name="hasSightseeing" 
+                        value="no" 
+                        checked={form.hasSightseeing==='no'} 
+                        onChange={handleChange}
+                        className="w-4 h-4 text-vibrant-blue focus:ring-vibrant-blue" 
+                      />
+                      <span>No</span>
+                    </label>
+                  </div>
+                </div>
+                {form.hasSightseeing === 'yes' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700" htmlFor="sightseeingDays">How many days? *</label>
+                    <input 
+                      id="sightseeingDays" 
+                      name="sightseeingDays" 
+                      type="number" 
+                      min="1" 
+                      max="30"
+                      value={form.sightseeingDays} 
+                      onChange={handleChange}
+                      className="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-vibrant-blue focus:border-vibrant-blue transition-all duration-200 hover:border-gray-400"
+                      required={form.hasSightseeing === 'yes'}
+                    />
+                  </div>
+                )}
+              </div>
+
+              {form.hasSightseeing === 'yes' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Preferred places</label>
+                  <div className="mt-2 grid sm:grid-cols-3 gap-3">
+                    {sightseeingOptions.map(opt => (
+                      <label 
+                        key={opt.value} 
+                        className="inline-flex items-center gap-2 p-3 border border-gray-200 rounded-xl hover:bg-gray-50 cursor-pointer transition-all duration-200 hover:border-vibrant-blue hover:shadow-sm"
+                      >
+                        <input 
+                          type="checkbox" 
+                          checked={form.sightseeingPrefs.includes(opt.value)} 
+                          onChange={() => handleMultiSelect(opt.value)}
+                          className="w-4 h-4 text-vibrant-blue focus:ring-vibrant-blue rounded" 
+                        />
+                        <span>{opt.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div>
-                <label className="block text-sm font-medium text-gray-700" htmlFor="sightseeingDays">How many days? *</label>
-                <input 
-                  id="sightseeingDays" 
-                  name="sightseeingDays" 
-                  type="number" 
-                  min="1" 
-                  max="30"
-                  value={form.sightseeingDays} 
+                <label className="block text-sm font-medium text-gray-700" htmlFor="notes">Additional details</label>
+                <textarea 
+                  id="notes" 
+                  name="notes" 
+                  rows="4" 
+                  value={form.notes} 
                   onChange={handleChange}
                   className="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-vibrant-blue focus:border-vibrant-blue transition-all duration-200 hover:border-gray-400"
-                  required={form.hasSightseeing === 'yes'}
+                  placeholder="Existing conditions, allergies, medications, preferred travel dates, companions, etc."
                 />
               </div>
-            )}
-          </div>
-
-          {form.hasSightseeing === 'yes' && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Preferred places</label>
-              <div className="mt-2 grid sm:grid-cols-3 gap-3">
-                {sightseeingOptions.map(opt => (
-                  <label 
-                    key={opt.value} 
-                    className="inline-flex items-center gap-2 p-3 border border-gray-200 rounded-xl hover:bg-gray-50 cursor-pointer transition-all duration-200 hover:border-vibrant-blue hover:shadow-sm"
-                  >
-                    <input 
-                      type="checkbox" 
-                      checked={form.sightseeingPrefs.includes(opt.value)} 
-                      onChange={() => handleMultiSelect(opt.value)}
-                      className="w-4 h-4 text-vibrant-blue focus:ring-vibrant-blue rounded" 
-                    />
-                    <span>{opt.label}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
+            </>
           )}
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700" htmlFor="notes">Additional details</label>
-            <textarea 
-              id="notes" 
-              name="notes" 
-              rows="4" 
-              value={form.notes} 
-              onChange={handleChange}
-              className="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-vibrant-blue focus:border-vibrant-blue transition-all duration-200 hover:border-gray-400"
-              placeholder="Existing conditions, allergies, medications, preferred travel dates, companions, etc."
-            />
-          </div>
-
-          {/* File Upload Section */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700">
-              Upload medical documents
-            </label>
-            <p className="text-xs text-gray-500 mt-1">Max 50MB per file. Supported: PDF, JPG, PNG, DOC, DOCX</p>
-            <input 
-              type="file" 
-              multiple 
-              accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-              onChange={handleFiles}
-              disabled={isUploading || isSubmitting}
-              className="mt-2 block w-full text-sm text-gray-700 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-vibrant-blue file:text-white hover:file:brightness-105 disabled:opacity-50 disabled:cursor-not-allowed" 
-            />
-            {files.length > 0 && (
-              <div className="mt-3 space-y-2">
-                <p className="text-sm font-medium text-gray-700">Selected files ({files.length}):</p>
-                <ul className="text-sm text-gray-600 space-y-1">
-                  {files.map((f, i) => (
-                    <li key={i} className="flex items-center gap-2">
-                      <svg className="w-4 h-4 text-vibrant-blue" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
-                      </svg>
-                      <span>{f.name} ({(f.size / 1024 / 1024).toFixed(2)} MB)</span>
-                    </li>
-                  ))}
-                </ul>
+          {step === 1 && (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Prescription Document <span className="text-gray-500">(PDF, JPG, PNG, DOC, DOCX)</span>
+                </label>
+                <input 
+                  type="file" 
+                  accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                  onChange={handlePrescriptionFile}
+                  disabled={isUploading || isSubmitting}
+                  className="mt-2 block w-full text-sm text-gray-700 border border-gray-300 rounded-lg p-2 bg-white hover:bg-gray-50 transition-colors cursor-pointer"
+                />
+                {prescriptionFile && (
+                  <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded-lg">
+                    <p className="text-sm text-green-800">✓ {prescriptionFile.name}</p>
+                  </div>
+                )}
               </div>
-            )}
-            {isUploading && (
-              <div className="mt-3">
-                <div className="flex items-center justify-between text-sm text-gray-600 mb-1">
-                  <span>Uploading to S3...</span>
-                  <span>{uploadProgress}%</span>
-                </div>
-                <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div 
-                    className="bg-vibrant-blue h-2 rounded-full transition-all duration-300"
-                    style={{ width: `${uploadProgress}%` }}
-                  />
-                </div>
-              </div>
-            )}
-          </div>
 
-          {/* Submit Button */}
+              <div className="mt-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Pathology Report <span className="text-gray-500">(PDF, JPG, PNG, DOC, DOCX)</span>
+                </label>
+                <input 
+                  type="file" 
+                  accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                  onChange={handlePathologyFile}
+                  disabled={isUploading || isSubmitting}
+                  className="mt-2 block w-full text-sm text-gray-700 border border-gray-300 rounded-lg p-2 bg-white hover:bg-gray-50 transition-colors cursor-pointer"
+                />
+                {pathologyFile && (
+                  <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded-lg">
+                    <p className="text-sm text-green-800">✓ {pathologyFile.name}</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Scans / Imaging Reports <span className="text-gray-500">(PDF, JPG, PNG, DICOM)</span>
+                </label>
+                <input 
+                  type="file" 
+                  multiple
+                  accept=".jpg,.jpeg,.png,.dcm,.pdf"
+                  onChange={handleScanFiles}
+                  disabled={isUploading || isSubmitting}
+                  className="mt-2 block w-full text-sm text-gray-700 border border-gray-300 rounded-lg p-2 bg-white hover:bg-gray-50 transition-colors cursor-pointer"
+                />
+                {scanFiles.length > 0 && (
+                  <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded-lg">
+                    <p className="text-sm font-medium text-green-800 mb-1">✓ {scanFiles.length} file(s) selected:</p>
+                    <ul className="text-sm text-green-700 list-disc list-inside">
+                      {scanFiles.map((f,i) => <li key={i}>{f.name}</li>)}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
           <div className="pt-2 flex gap-4">
-            <button 
-              type="submit" 
-              disabled={isUploading || isSubmitting}
-              className="flex-1 md:flex-initial px-8 py-4 rounded-xl text-white font-semibold bg-gradient-to-r from-vibrant-blue to-teal-500 hover:brightness-105 transition-all shadow-lg hover:shadow-xl transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
-            >
-              {isSubmitting ? (
-                <span className="flex items-center justify-center gap-2">
-                  <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                  </svg>
-                  Submitting...
-                </span>
+            <div className="flex-1 md:flex-initial">
+              {step === 0 ? (
+                <button 
+                  type="submit"
+                  className="w-full px-8 py-4 rounded-xl text-white font-semibold bg-gradient-to-r from-vibrant-blue to-teal-500 hover:brightness-105 transition-all shadow-lg"
+                >
+                  Continue to Uploads →
+                </button>
               ) : (
-                'Submit Profile'
+                <button 
+                  type="submit" 
+                  disabled={isUploading || isSubmitting}
+                  className="w-full px-8 py-4 rounded-xl text-white font-semibold bg-gradient-to-r from-vibrant-blue to-teal-500 hover:brightness-105 transition-all shadow-lg"
+                >
+                  {isSubmitting ? 'Submitting...' : 'Submit Profile'}
+                </button>
               )}
-            </button>
+            </div>
+
             <button
               type="button"
-              onClick={() => navigate('/')}
+              onClick={() => {
+                if (step === 0) return navigate('/')
+                setStep(s => Math.max(0, s - 1))
+              }}
               className="px-6 py-4 rounded-xl font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 transition-all"
             >
-              Cancel
+              {step === 0 ? 'Cancel' : '← Back'}
             </button>
           </div>
         </form>
