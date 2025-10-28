@@ -107,7 +107,7 @@ def save_analysis_results(state: MessageState, cached_doc: dict = None):
 
 try:
     llm = ChatAnthropic(
-        model_name="claude-3-haiku-20240307",
+        model_name="claude-3-5-sonnet-20241022",
         temperature=0,
         timeout=60,
         max_retries=3,

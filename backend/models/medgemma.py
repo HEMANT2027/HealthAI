@@ -51,7 +51,7 @@ class MedGemmaMultiInputClient:
 
 
 if __name__ == "__main__":
-    client = MedGemmaMultiInputClient(endpoint_name="jumpstart-dft-hf-vlm-gemma-3-27b-in-20251026-050912")
+    client = MedGemmaMultiInputClient(endpoint_name="jumpstart-dft-hf-vlm-gemma-3-27b-in-20251028-060633")
 
     prescription_text = "Tab Paracetamol 500mg twice daily for 5 days"
     pathology_text = "Histology shows dense lymphocytic infiltration with atypical nuclei"

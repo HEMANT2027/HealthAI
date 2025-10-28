@@ -1,4 +1,4 @@
-from graph_health import health_rag_graph_with_memory, MessageState
+from .graph_health import health_rag_graph_with_memory, MessageState
 import uuid
 
 print("\n💬 HealthAI Interactive Chat (With Conversation Memory)")

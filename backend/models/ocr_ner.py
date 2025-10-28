@@ -239,7 +239,7 @@ class MedicalOCRPipeline:
 
 # --- Example Usage ---
 if __name__ == "__main__":
-    image_path = "Screenshot from 2025-03-18 19-51-33.png"  # Make sure this file exists in your working directory
+    image_path = "WhatsApp Image 2025-10-28 at 17.34.20.jpeg"  # Make sure this file exists in your working directory
     gcp_key_path = "heroic-dynamo-473510-q9-936d0b6e305a.json"  # Replace with your actual key file
     gemini_api_key = "AIzaSyAh0g0SF0NFvbhLDiOXPLGp-JhBBvmDS4c"  # Replace with your actual Gemini API key
 

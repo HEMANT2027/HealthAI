@@ -55,35 +55,7 @@ function Reports() {
   const pathParts = location.pathname.split("/");
   const pseudonym_id = pathParts[pathParts.length - 1] || location.state?.pseudonym_id;
 
-  const initialPrescriptionOCR = useMemo(
-    () =>
-      `Dr. Sarah Mitchell, MD
-Cardiology Department
-City General Hospital
-
-Patient: Alex Johnson
-Age: 54 | Gender: Male
-Date: October 25, 2024
-
-Chief Complaint: Chronic right knee pain with swelling
-
-Prescription:
-1. Ibuprofen 400mg - Take 1 tablet twice daily with food for pain
-2. Glucosamine 1500mg - Take 1 tablet daily for joint health
-3. Omeprazole 20mg - Take 1 tablet daily before breakfast (for gastric protection)
-
-Instructions:
-- Continue current physiotherapy sessions (3x per week)
-- Apply ice pack to affected area for 15-20 minutes, 3 times daily
-- Avoid high-impact activities (running, jumping)
-- Use knee brace during physical activities
-
-Follow-up: Schedule appointment in 4 weeks
-
-Dr. Sarah Mitchell
-License #: MD-12345-NY`,
-    []
-  );
+  const initialPrescriptionOCR = useMemo(() => []);
 
   // Sample medical scan images - will be replaced with actual data from backend
   const [sampleImages, setSampleImages] = useState([
@@ -102,11 +74,11 @@ License #: MD-12345-NY`,
   const [redoStack, setRedoStack] = useState({});
   const [regionAnalysis, setRegionAnalysis] = useState("");
   const [overallReport, setOverallReport] = useState("");
-  const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState("");
   const [savedReportId, setSavedReportId] = useState(null);
   const [processing, setProcessing] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -181,47 +153,12 @@ License #: MD-12345-NY`,
   const currentImage = sampleImages[currentImageIndex];
   const selectedRegions = imageRegions[currentImage?.id] || [];
 
-  // Generate region analysis when moving to step 3
-  useEffect(() => {
-    if (step === 3 && !regionAnalysis) {
-      generateRegionAnalysis();
-    }
-  }, [step]);
-
-  // Generate overall report when moving to step 4
+  // Generate overall report when moving to step 2
   useEffect(() => {
     if (step === 2 && !overallReport) {
       generateOverallReport();
     }
   }, [step]);
-
-  const generateRegionAnalysis = () => {
-    const totalRegions = getTotalRegions();
-    const imagesWithRegions = Object.keys(imageRegions).length;
-    
-    let analysis = `REGION ANALYSIS REPORT\n`;
-    analysis += `Generated: ${new Date().toLocaleString()}\n\n`;
-    analysis += `Summary:\n`;
-    analysis += `- Total scans analyzed: ${imagesWithRegions}\n`;
-    analysis += `- Total regions of interest marked: ${totalRegions}\n\n`;
-    
-    Object.entries(imageRegions).forEach(([imageId, regions]) => {
-      const image = sampleImages.find(img => img.id === parseInt(imageId));
-      if (regions.length > 0) {
-        analysis += `${image.name}:\n`;
-        regions.forEach((region, idx) => {
-          analysis += `  Region ${idx + 1}: Area of concern detected at coordinates (${Math.round(region.x)}, ${Math.round(region.y)})\n`;
-          analysis += `    - Dimensions: ${Math.round(region.w)}x${Math.round(region.h)} pixels\n`;
-          analysis += `    - Clinical significance: Requires radiologist review\n`;
-        });
-        analysis += `\n`;
-      }
-    });
-    
-    analysis += `Recommendation: All marked regions should be reviewed by a specialist for detailed assessment.`;
-    
-    setRegionAnalysis(analysis);
-  };
 
   const generateOverallReport = () => {
     let report = `COMPREHENSIVE MEDICAL REPORT\n`;
@@ -528,6 +465,7 @@ License #: MD-12345-NY`,
     try {
       setAnalysisLoading(true);
       setAnalysisError("");
+      setLoading(true);
       
       const token = localStorage.getItem("token");
       const payload = buildPayloadForMedGemma();
@@ -552,10 +490,12 @@ License #: MD-12345-NY`,
       } else {
         setOverallReport("No analysis returned from model.");
       }
+      setLoading(false);
+      setAnalysisLoading(false);
     } catch (err) {
       console.error("MedGemma analysis failed:", err);
       setOverallReport("Analysis failed: " + (err.message || "unknown error"));
-    } finally {
+      setLoading(false);
       setAnalysisLoading(false);
     }
   };
@@ -581,7 +521,7 @@ License #: MD-12345-NY`,
           {loading ? (
             <div className="flex flex-col items-center justify-center h-96">
               <div className="text-xl font-semibold text-gray-800 mb-4">
-                Loading intake form data...
+                Loading data from models...
               </div>
               <div className="w-16 h-16 border-4 border-vibrant-blue border-t-transparent rounded-full animate-spin"></div>
             </div>

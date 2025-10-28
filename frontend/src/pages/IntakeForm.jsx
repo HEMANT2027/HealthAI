@@ -564,7 +564,7 @@ function IntakeForm() {
                 type="button"
                 onClick={() => {
                   setShowModal(false)
-                  navigate('/profile')
+                  navigate(`/profile/${userData.pseudonym_id}`)
                 }}
                 className="px-6 py-2 rounded-lg text-white font-semibold bg-gradient-to-r from-vibrant-blue to-teal-500 hover:brightness-105 shadow-md"
               >

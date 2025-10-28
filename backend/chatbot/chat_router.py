@@ -52,17 +52,12 @@ async def chat_query(
 
         # Process through RAG graph
         response = None
-        for result, _ in health_rag_graph_with_memory.stream(
+        result = health_rag_graph_with_memory.invoke(
             state,
-            config={'configurable': {'thread_id': thread_id}},
-            stream_mode="messages"
-        ):
-            if result.content:
-                response = result.content
-
-        if not response:
-            raise HTTPException(status_code=500, detail="No response generated")
-
+            config={'configurable': {'thread_id': thread_id}}
+        )
+        response  = result.content
+        print(response)
         return {
             "response": response,
             "thread_id": thread_id

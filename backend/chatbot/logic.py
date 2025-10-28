@@ -14,7 +14,7 @@ load_dotenv()
 embeddings = OpenAIEmbeddings()
 
 model = ChatAnthropic(
-    model_name="claude-3-sonnet-20240229",
+    model_name="claude-3-5-sonnet-20241022",
     max_tokens_to_sample=4096,
     timeout=120,
     stop=None,

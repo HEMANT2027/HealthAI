@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import Dict, Any, List
 from pymongo import MongoClient
 import datetime
+import asyncio
 import os
 import tempfile
 import requests
@@ -59,66 +60,83 @@ async def get_intake_form_data(
     current_user: dict = Depends(authMiddleware)
 ):
     """
-    Fetch intake form data for a patient and process documents
+    Fetch intake form data for a patient and process documents concurrently
+    (prescription + pathology OCR in parallel)
     """
     try:
-        # Find intake form
-        intake_form = form_collection.find_one({
-            "patient": pseudonym_id
-        })
-        
+        # Fetch the intake form
+        intake_form = form_collection.find_one({"patient": pseudonym_id})
         if not intake_form:
             raise HTTPException(status_code=404, detail="Intake form not found")
-                
+
         documents = intake_form.get("documents", [])
-        
-        # Process prescription file
         prescription_file = next((doc for doc in documents if doc.get("type") == "prescription"), None)
-        prescription_ocr = None
-        if prescription_file and MedicalOCRPipeline:
+        pathology_file = next((doc for doc in documents if doc.get("type") == "pathology"), None)
+        scan_files = [doc for doc in documents if doc.get("type") == "scan"]
+
+        async def process_prescription():
+            if not prescription_file or not MedicalOCRPipeline:
+                return None
             try:
-                pipeline = MedicalOCRPipeline(
-                    image_path=prescription_file.get("url"),
-                    gcp_key_path=GCP_KEY_PATH,
-                    gemini_api_key=os.getenv("GEMINI_API_KEY")
+                return await asyncio.to_thread(
+                    lambda: _run_medical_ocr(prescription_file.get("url"))
                 )
-                pipeline.run()
-                prescription_ocr = pipeline.full_text
             except Exception as e:
                 print(f"Error processing prescription OCR: {e}")
-                prescription_ocr = "Error processing prescription file"
-        
-        # Process pathology file
-        pathology_file = next((doc for doc in documents if doc.get("type") == "pathology"), None)
-        pathology_ocr = None
-        if pathology_file and PDFPathologyPipeline:
+                return "Error processing prescription file"
+
+        async def process_pathology():
+            if not pathology_file or not PDFPathologyPipeline:
+                return None
             try:
-                pipeline = PDFPathologyPipeline(
-                    pdf_path=pathology_file.get("url"),
-                    gcp_key_path=GCP_KEY_PATH,
-                    gemini_api_key=os.getenv("GEMINI_API_KEY")
+                return await asyncio.to_thread(
+                    lambda: _run_pathology_ocr(pathology_file.get("url"))
                 )
-                pipeline.run()
-                pathology_ocr = pipeline.ocr_text
             except Exception as e:
                 print(f"Error processing pathology OCR: {e}")
-                pathology_ocr = "Error processing pathology file"
-        
-        # Get scan files
-        scan_files = [doc for doc in documents if doc.get("type") == "scan"]
-        
+                return "Error processing pathology file"
+
+        # Run both OCRs in parallel
+        prescription_ocr, pathology_ocr = await asyncio.gather(
+            process_prescription(),
+            process_pathology()
+        )
+
         return {
             "success": True,
             "prescription_ocr": prescription_ocr,
             "pathology_ocr": pathology_ocr,
-            "scan_images": [{"url": doc.get("url"), "name": doc.get("fileName")} for doc in scan_files]
+            "scan_images": [
+                {"url": doc.get("url"), "name": doc.get("fileName")}
+                for doc in scan_files
+            ],
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# Helper functions for threaded execution
+def _run_medical_ocr(image_url: str):
+    pipeline = MedicalOCRPipeline(
+        image_path="WhatsApp Image 2025-10-28 at 17.34.20.jpeg",
+        gcp_key_path=GCP_KEY_PATH,
+        gemini_api_key=os.getenv("GEMINI_API_KEY")
+    )
+    pipeline.run()
+    return pipeline.full_text
+
+
+def _run_pathology_ocr(pdf_url: str):
+    pipeline = PDFPathologyPipeline(
+        pdf_path=pdf_url,
+        gcp_key_path=GCP_KEY_PATH,
+        gemini_api_key=os.getenv("GEMINI_API_KEY")
+    )
+    pipeline.run()
+    return pipeline.ocr_text
 
 # ==============================
 # 1️⃣ Run OCR + Gemini Pipeline
@@ -230,7 +248,7 @@ async def analyze_with_medgemma(payload: dict = Body(...)):
     if not images:
         raise HTTPException(status_code=400, detail="No images provided")
 
-    endpoint_name = os.getenv("MEDGEMMA_ENDPOINT") or "jumpstart-dft-hf-vlm-gemma-3-27b-in-20251026-050912"
+    endpoint_name = os.getenv("MEDGEMMA_ENDPOINT") or "jumpstart-dft-hf-vlm-gemma-3-27b-in-20251028-060633"
     client = MedGemmaMultiInputClient(endpoint_name=endpoint_name)
 
     temp_files = []

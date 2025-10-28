@@ -65,7 +65,7 @@ function Chatbot() {
           thread_id: localStorage.getItem(`chat_thread_${pseudonym_id}`) || undefined
         })
       });
-
+      console.log(response);
       if (!response.ok) throw new Error('Chat query failed');
       const data = await response.json();
 
