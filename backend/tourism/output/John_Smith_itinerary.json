@@ -1,0 +1,132 @@
+{
+    "HospitalRecommendations": [
+        {
+            "Name": "Medanta - The Medicity",
+            "City": "Gurugram (Delhi NCR)",
+            "Accreditation": "JCI, NABH",
+            "Specialization": "Medanta has a world-renowned Institute of Musculoskeletal Disorders and Orthopaedics. They utilize advanced techniques like computer-navigated surgery for knee replacements, ensuring high precision and faster recovery. Their international patient services are comprehensive.",
+            "ApproxTreatmentCost": "$6,000 - $8,000 USD (for single knee replacement, includes standard tests, surgeon fees, and hospital stay)",
+            "Website": "https://www.medanta.org/international-patient/"
+        },
+        {
+            "Name": "Fortis Memorial Research Institute (FMRI)",
+            "City": "Gurugram (Delhi NCR)",
+            "Accreditation": "JCI, NABH",
+            "Specialization": "The Fortis Bone & Joint Institute is a center of excellence for orthopedic procedures. They have a team of highly experienced surgeons and a dedicated physiotherapy department crucial for post-operative recovery. They are well-versed in handling international patients.",
+            "ApproxTreatmentCost": "$5,500 - $7,500 USD",
+            "Website": "https://www.fortishealthcare.com/india/international-patients"
+        },
+        {
+            "Name": "Indraprastha Apollo Hospitals",
+            "City": "New Delhi",
+            "Accreditation": "JCI, NABH",
+            "Specialization": "A pioneer in Indian private healthcare, the Apollo Institutes of Orthopaedics has one of the highest success rates for knee replacement surgeries in the region. Their comprehensive care includes pre-arrival assistance, airport transfers, and post-discharge follow-ups.",
+            "ApproxTreatmentCost": "$6,000 - $8,500 USD",
+            "Website": "https://www.apollohospitals.com/international-patient-services"
+        }
+    ],
+    "Itinerary": [
+        {
+            "Day": "1",
+            "Activity": "Arrival in Delhi (DEL)",
+            "Notes": "Arrive at Indira Gandhi International Airport. A pre-arranged hospital/hotel representative will meet you. Transfer to your pre-booked serviced apartment or hotel in Gurugram. Rest and acclimatize."
+        },
+        {
+            "Day": "2",
+            "Activity": "Rest and Relaxation",
+            "Notes": "Take it easy to recover from jet lag. Your hospital coordinator can assist with local SIM cards or any other necessities."
+        },
+        {
+            "Day": "3",
+            "Activity": "Pre-Operation Consultation & Checkup",
+            "Notes": "Visit the hospital for your consultation with the orthopedic surgeon. Complete all pre-operative tests (blood work, X-rays, ECG, anesthesia clearance)."
+        },
+        {
+            "Day": "4",
+            "Activity": "Surgery Day",
+            "Notes": "Get admitted to the hospital in the morning. The knee replacement surgery will be performed. Your wife can stay in the private room with you or at the nearby accommodation."
+        },
+        {
+            "Day": "5 - 8",
+            "Activity": "In-Hospital Recovery",
+            "Notes": "Post-operative care, pain management, and initial physiotherapy sessions. You will be encouraged to stand and walk with a walker under supervision."
+        },
+        {
+            "Day": "9",
+            "Activity": "Discharge from Hospital",
+            "Notes": "Discharge to your apartment/hotel. The hospital will provide all necessary medications and a detailed recovery plan. A physiotherapist will be scheduled for home visits."
+        },
+        {
+            "Day": "10 - 17",
+            "Activity": "At-Home Recovery & Physiotherapy",
+            "Notes": "Focus on rest and daily physiotherapy. Minimal movement is advised initially. Towards the end of this period, short, wheelchair-assisted outings to nearby accessible places are possible."
+        },
+        {
+            "Day": "18",
+            "Activity": "Post-Op Follow-up",
+            "Notes": "Visit your surgeon for a follow-up appointment. Stitches or staples will be removed. Your progress will be assessed."
+        },
+        {
+            "Day": "19 - 20",
+            "Activity": "Continued Recovery",
+            "Notes": "Continue with physiotherapy. You should feel a significant improvement in mobility, likely using crutches or a cane."
+        },
+        {
+            "Day": "21",
+            "Activity": "Final Checkup & Sightseeing Start (Agra)",
+            "Notes": "Final consultation with your surgeon to get a 'Fit to Travel' certificate. Begin your 7-day sightseeing tour with a private, comfortable car and driver. Drive to Agra (approx. 4 hours)."
+        },
+        {
+            "Day": "22",
+            "Activity": "Agra: Taj Mahal & Fort",
+            "Notes": "Visit the Taj Mahal (wheelchair accessible) in the morning. Later, visit Agra Fort, focusing on the accessible ground-level areas. Do not overexert."
+        },
+        {
+            "Day": "23",
+            "Activity": "Travel to Jaipur",
+            "Notes": "Drive to Jaipur, the 'Pink City' (approx. 5 hours). Check into your hotel and rest for the evening."
+        },
+        {
+            "Day": "24",
+            "Activity": "Jaipur: Historical Sightseeing",
+            "Notes": "Enjoy a comfortable city tour. Drive past Hawa Mahal (Palace of Winds), and visit the City Palace and Jantar Mantar (observatory), which are largely accessible on the ground floor."
+        },
+        {
+            "Day": "25",
+            "Activity": "Jaipur Shopping & Return to Delhi",
+            "Notes": "Explore local markets like Bapu Bazaar for textiles and souvenirs (your wife can do the walking while you relax at a nearby cafe). In the afternoon, drive back to your accommodation in Delhi/Gurugram."
+        },
+        {
+            "Day": "26 - 27",
+            "Activity": "Relaxation & Local Delhi Exploration",
+            "Notes": "Rest from your trip. For a light outing, visit Dilli Haat, an accessible open-air craft bazaar, or select city temples that have ramp access. Final souvenir shopping."
+        },
+        {
+            "Day": "28",
+            "Activity": "Departure",
+            "Notes": "Transfer to Delhi's IGI Airport (DEL) for your flight back to the United States. Ensure you have your medical documents and 'Fit to Fly' certificate handy."
+        }
+    ],
+    "RecoveryAndSightseeing": [
+        {
+            "Place": "Cyber Hub, Gurugram",
+            "WhyRecommended": "An upscale, open-air food and entertainment complex. It is completely accessible with ramps and elevators, perfect for a wheelchair or crutch-assisted outing. It's a great place to enjoy an evening without much walking.",
+            "NearbyDietaryOptions": "Excellent options for international cuisine (American, Italian, Mexican). High-end restaurants here can easily accommodate requests for low-sodium meals suitable for someone on blood pressure medication. No dietary restrictions will be an issue."
+        },
+        {
+            "Place": "Ambience Mall, Gurugram",
+            "WhyRecommended": "A large, modern, and fully air-conditioned mall. It's wheelchair-friendly and offers a comfortable environment to spend a few hours, shop, or watch a movie. It provides a change of scenery from the hotel room without physical strain.",
+            "NearbyDietaryOptions": "The mall has a vast food court and numerous fine dining restaurants with diverse menus. Finding American or Continental food is very easy. All major food chains are present."
+        },
+        {
+            "Place": "Kingdom of Dreams, Gurugram",
+            "WhyRecommended": "Offers a spectacular, seated Bollywood-style musical show. The main theatre ('Nautanki Mahal') is accessible. It's a perfect cultural experience that is entertaining and requires no physical exertion.",
+            "NearbyDietaryOptions": "Inside, there is a food court called 'Culture Gully' representing various Indian states, but also offering general snacks and beverages. It's best to eat at a more controlled restaurant in Cyber Hub before or after the show for specific dietary needs."
+        },
+        {
+            "Place": "Meal & Dietary Information",
+            "WhyRecommended": "It's important to manage your diet post-surgery, especially with your blood pressure condition. All recommended JCI-accredited hospitals have dedicated dieticians who will create a meal plan for you based on your medical needs and preference for American/Continental food. Most upscale hotels and serviced apartments in Gurugram offer 24/7 room service with international menus and can cater to low-sodium and other specific dietary requests.",
+            "NearbyDietaryOptions": "Your wife can also use services like 'Zomato' or 'Swiggy' (Indian food delivery apps) to order from a wide variety of vetted, high-quality restaurants directly to your accommodation."
+        }
+    ]
+}

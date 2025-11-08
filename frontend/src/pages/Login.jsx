@@ -2,7 +2,6 @@ import { Link } from 'react-router-dom';
 // import { useDispatch } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { useState } from 'react';
-import GoogleLoginButton from '../components/GoogleLoginButton.jsx';
 
 function Login() {
   const [form, setForm] = useState({ email: '', password: '' });
@@ -69,7 +68,15 @@ function Login() {
           <div className="absolute inset-0 bg-gradient-to-t from-black/30 via-black/10 to-transparent"></div>
           <div className="relative p-12 text-white flex flex-col justify-end h-full">
             <div className="transform hover:scale-105 transition-transform duration-300">
-              <h1 className="text-5xl font-extrabold leading-tight">Welcome Back to MedicoTourism</h1>
+              <h1 className="text-5xl font-extrabold leading-tight">
+                Welcome Back To{' '}
+                <Link
+                  to="/"
+                  className="text-teal-300 hover:text-vibrant-orange transition-colors duration-300 underline-offset-4 hover:underline"
+                >
+                  MedicoTourism
+                </Link>
+              </h1>
               <p className="mt-4 text-xl text-blue-100">Continue exploring the world along with treatment and recovery.</p>
             </div>
           </div>
@@ -150,14 +157,14 @@ function Login() {
               <div className="absolute inset-0 flex items-center" aria-hidden="true">
                 <div className="w-full border-t border-gray-300" />
               </div>
-              <div className="relative flex justify-center text-sm">
+              </div>
+              {/* <div className="relative flex justify-center text-sm">
                 <span className="px-2 bg-white bg-opacity-80 text-gray-500">OR</span>
               </div>
-            </div>
             
             <div className="mt-6 flex justify-center gap-4">
               <GoogleLoginButton />
-            </div>
+            </div> */}
           </div>
         </div>
       </div>

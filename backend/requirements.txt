@@ -20,4 +20,30 @@ motor
 boto3
 botocore
 
+# Image Processing
+opencv-python
+Pillow
+numpy
+
+# OpenAI for Vision API
+openai
+
+# Google Cloud APIs (Optional - can be skipped if not using OCR/Pathology)
+google-cloud-vision
+google-generativeai
+
+# MongoDB connection string parsing
 dnspython
+
+# Environment variables
+python-dotenv
+fitz
+
+# Requests (for API calls)
+requests
+langgraph
+langchain
+langchain_openai
+langchain_anthropic
+langchain_text_splitters
+langchain_chroma

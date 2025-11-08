@@ -81,7 +81,7 @@ function Navbar() {
               </NavLink>
               
               <NavLink 
-                to="/profile" 
+                to={`/profile/${user.pseudonym_id}`}
                 className={({isActive}) => `transition-colors ${isActive ? 'text-vibrant-blue' : 'text-gray-700 hover:text-vibrant-orange'}`}
               >
                 Profile
@@ -99,12 +99,6 @@ function Navbar() {
                 Doctor Panel
               </NavLink>
               
-              <NavLink 
-                to="/reports" 
-                className={({isActive}) => `transition-colors ${isActive ? 'text-vibrant-blue' : 'text-gray-700 hover:text-vibrant-orange'}`}
-              >
-                Reports
-              </NavLink>
             </>
           )}
           

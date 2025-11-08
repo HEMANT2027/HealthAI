@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
-from Mongo_connect import get_mongo_connection
-from auth import authMiddleware
+from .Mongo_connect import get_mongo_connection
+from .auth import authMiddleware
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -12,7 +12,7 @@ try:
     mongo_conn = get_mongo_connection()
     db = mongo_conn.get_database()
     users_collection = db.get_collection("users")
-    visit_data_collection = db.get_collection("visit_data")
+    patients_collection = db.get_collection("patients")
     print("✅ MongoDB connected in admin.py")
 except Exception as e:
     print(f"❌ MongoDB connection failed in admin.py: {e}")
@@ -75,11 +75,11 @@ async def get_unassigned_patients(current_user: dict = Depends(authMiddleware)):
     
     try:
         # Debug: Check total documents first
-        total_count = visit_data_collection.count_documents({})
-        print(f"🔍 Total documents in visit_data: {total_count}")
+        total_count = patients_collection.count_documents({})
+        print(f"🔍 Total documents in patients: {total_count}")
         
         # Debug: Check all assigned_doctor values
-        all_patients = list(visit_data_collection.find({}, {"pseudonym_id": 1, "assigned_doctor": 1}))
+        all_patients = list(patients_collection.find({}, {"pseudonym_id": 1, "assigned_doctor": 1}))
         print(f"🔍 All patients with assigned_doctor field:")
         for p in all_patients:
             print(f"   - {p.get('pseudonym_id')}: assigned_doctor = {repr(p.get('assigned_doctor'))}")
@@ -94,7 +94,7 @@ async def get_unassigned_patients(current_user: dict = Depends(authMiddleware)):
         }
         print(f"🔍 Query: {query}")
         
-        unassigned_patients = list(visit_data_collection.find(query))
+        unassigned_patients = list(patients_collection.find(query))
         print(f"🔍 Found {len(unassigned_patients)} unassigned patients")
         
         formatted_patients = []
@@ -185,7 +185,7 @@ async def assign_doctor(
             )
         
         # Update patient's assigned doctor
-        result = visit_data_collection.update_one(
+        result = patients_collection.update_one(
             {"pseudonym_id": request.patient_pseudonym_id},
             {
                 "$set": {
@@ -253,4 +253,104 @@ async def verify_doctor(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to verify doctor: {str(e)}"
+        )
+
+# ---------- DOCTOR ENDPOINTS ----------
+
+@router.get("/doctor/my-patients")
+async def get_doctor_patients(current_user: dict = Depends(authMiddleware)):
+    """Get all patients assigned to the logged-in doctor"""
+    if current_user.get("role") != "doctor":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only doctors can access this endpoint"
+        )
+    
+    try:
+        doctor_email = current_user.get("email")
+        
+        # Query for patients assigned to this doctor
+        assigned_patients = list(
+            patients_collection.find({
+                "assigned_doctor": doctor_email
+            })
+        )
+        
+        print(f"🔍 Doctor {doctor_email} has {len(assigned_patients)} assigned patients")
+        
+        formatted_patients = []
+        for patient in assigned_patients:
+            formatted_patients.append({
+                "id": str(patient["_id"]),
+                "pseudonym_id": patient["pseudonym_id"],
+                "patient_summary": patient.get("patient_summary", "No summary available"),
+                "created_at": patient.get("created_at"),
+                "updated_at": patient.get("updated_at"),
+                "assigned_doctor": patient.get("assigned_doctor"),
+                "visits": patient.get("visits", [])
+            })
+        
+        return {
+            "success": True,
+            "count": len(formatted_patients),
+            "patients": formatted_patients
+        }
+    except Exception as e:
+        print(f"❌ Error in get_doctor_patients: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch assigned patients: {str(e)}"
+        )
+
+@router.get("/doctor/patient/{pseudonym_id}")
+async def get_patient_details(
+    pseudonym_id: str,
+    current_user: dict = Depends(authMiddleware)
+):
+    """Get detailed information about a specific patient assigned to the doctor"""
+    if current_user.get("role") != "doctor":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only doctors can access this endpoint"
+        )
+    
+    try:
+        doctor_email = current_user.get("email")
+        
+        # Find patient and verify it's assigned to this doctor
+        patient = patients_collection.find_one({
+            "pseudonym_id": pseudonym_id,
+            "assigned_doctor": doctor_email
+        })
+        
+        if not patient:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Patient not found or not assigned to you"
+            )
+        
+        return {
+            "success": True,
+            "patient": {
+                "id": str(patient["_id"]),
+                "pseudonym_id": patient["pseudonym_id"],
+                "patient_summary": patient.get("patient_summary", ""),
+                "created_at": patient.get("created_at"),
+                "updated_at": patient.get("updated_at"),
+                "assigned_doctor": patient.get("assigned_doctor"),
+                "visits": patient.get("visits", []),
+                "source_system": patient.get("source_system", "")
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error in get_patient_details: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch patient details: {str(e)}"
         )
