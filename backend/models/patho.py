@@ -15,6 +15,8 @@ class PDFPathologyPipeline:
         self.image_dir = "pdf_pages"
         self.ocr_text = ""
         self.entities = []
+        # track any remote download (image/pdf) to clean up later
+        self._temp_downloaded = None
 
     def configure_gcp(self):
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = self.gcp_key_path
@@ -25,6 +27,45 @@ class PDFPathologyPipeline:
         self.model = genai.GenerativeModel("gemini-2.5-flash")
         print("✅ Gemini API configured.")
 
+    def _download_remote_file(self, url: str) -> str:
+        """
+        Download remote URL (PDF or image) to a temp file and return local path.
+        Sets self._temp_downloaded to the path so caller can clean up later.
+        """
+        try:
+            resp = requests.get(url, stream=True, timeout=30)
+            resp.raise_for_status()
+        except Exception as e:
+            raise RuntimeError(f"Could not download file from URL: {e}")
+
+        ct = resp.headers.get("content-type", "").lower()
+        suffix = ".jpg"
+        if "pdf" in ct or url.lower().endswith(".pdf"):
+            suffix = ".pdf"
+        elif "jpeg" in ct or url.lower().endswith((".jpg", ".jpeg")):
+            suffix = ".jpg"
+        elif "png" in ct or url.lower().endswith(".png"):
+            suffix = ".png"
+        elif "tiff" in ct or url.lower().endswith((".tif", ".tiff")):
+            suffix = ".tiff"
+
+        tf = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        try:
+            for chunk in resp.iter_content(1024 * 64):
+                if chunk:
+                    tf.write(chunk)
+            tf.flush()
+            tf.close()
+            self._temp_downloaded = tf.name
+            return tf.name
+        except Exception as e:
+            try:
+                tf.close()
+                os.remove(tf.name)
+            except Exception:
+                pass
+            raise RuntimeError(f"Failed saving remote file: {e}")
+
     def convert_pdf_to_images(self):
         print("📄 Converting PDF to images...")
         os.makedirs(self.image_dir, exist_ok=True)
@@ -32,22 +73,21 @@ class PDFPathologyPipeline:
         pdf_path = self.pdf_path
         temp_downloaded = None
 
-        # If pdf_path is a URL, download it first
-        if isinstance(pdf_path, str) and pdf_path.lower().startswith("http"):
+        # If pdf_path is a URL, download it first (will detect pdf vs image)
+        if isinstance(pdf_path, str) and pdf_path.lower().startswith(("http://", "https://")):
             try:
-                print(f"🔽 Downloading remote PDF: {pdf_path}")
-                r = requests.get(pdf_path, stream=True, timeout=30)
-                r.raise_for_status()
-                suffix = ".pdf"
-                tf = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-                with tf as f:
-                    for chunk in r.iter_content(1024 * 64):
-                        if chunk:
-                            f.write(chunk)
-                temp_downloaded = tf.name
-                pdf_path = temp_downloaded
+                print(f"🔽 Downloading remote file: {pdf_path}")
+                rpath = self._download_remote_file(pdf_path)
+                temp_downloaded = rpath
+                pdf_path = rpath
             except Exception as e:
-                raise RuntimeError(f"❌ Could not download PDF from URL: {e}")
+                raise RuntimeError(f"❌ Could not download remote file from URL: {e}")
+
+        # If the provided path is an image (local or downloaded), return it directly
+        lower = str(pdf_path).lower()
+        if lower.endswith((".png", ".jpg", ".jpeg", ".tiff", ".tif")):
+            print("🖼 Detected image input — returning single image path for OCR.")
+            return [pdf_path]
 
         try:
             doc = fitz.open(pdf_path)
@@ -65,8 +105,12 @@ class PDFPathologyPipeline:
             return image_paths
         finally:
             doc.close()
-            if temp_downloaded:
-                os.remove(temp_downloaded)  # Clean up temp file
+            # if we downloaded a PDF earlier, remove it now; if we downloaded an image, keep it
+            if temp_downloaded and temp_downloaded.lower().endswith(".pdf"):
+                try:
+                    os.remove(temp_downloaded)
+                except Exception:
+                    pass
 
     def run_ocr_on_images(self, image_paths):
         print("🔍 Running OCR on images...")
@@ -132,6 +176,13 @@ Text:
             self.run_gemini_ner()
         except Exception as e:
             print(f"\n❌ Pipeline failed: {e}")
+        finally:
+            # Cleanup any temp download (image or pdf) if present
+            try:
+                if getattr(self, "_temp_downloaded", None) and os.path.exists(self._temp_downloaded):
+                    os.remove(self._temp_downloaded)
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

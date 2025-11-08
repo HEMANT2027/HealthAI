@@ -11,6 +11,7 @@ import google.generativeai as genai
 from fastapi import APIRouter, HTTPException, Body
 import fitz  
 import shutil  # <-- added
+from PIL import Image  # <-- added
 
 router = APIRouter(prefix="/ocr", tags=["OCR_NER"])
 
@@ -27,12 +28,55 @@ class MedicalOCRPipeline:
         # Minimal additions to support PDF input
         self.pdf_path = None
         self.image_dir = None
+        # track any temp file downloaded (image/pdf)
+        self._temp_downloaded = None
+
         if isinstance(image_path, str):
             lower = image_path.lower()
             if lower.endswith(".pdf") or (lower.startswith("http") and ".pdf" in lower):
                 self.pdf_path = image_path
                 # create temporary directory to hold converted page images
                 self.image_dir = tempfile.mkdtemp(prefix="ocr_pdf_")
+
+    def _download_remote_file(self, url: str) -> str:
+        """Download remote URL (image or PDF) to a temp file and return local path."""
+        try:
+            resp = requests.get(url, stream=True, timeout=30)
+            resp.raise_for_status()
+        except Exception as e:
+            raise RuntimeError(f"Could not download file from URL: {e}")
+
+        # infer suffix from content-type or url
+        ct = resp.headers.get("content-type", "")
+        suffix = None
+        if "pdf" in ct:
+            suffix = ".pdf"
+        elif "jpeg" in ct or "jpg" in ct:
+            suffix = ".jpg"
+        elif "png" in ct:
+            suffix = ".png"
+        elif "tiff" in ct or "tif" in ct:
+            suffix = ".tiff"
+        else:
+            parsed = os.path.splitext(url.split("?")[0])
+            suffix = parsed[1] if len(parsed) > 1 and parsed[1] else ".jpg"
+
+        tf = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        try:
+            for chunk in resp.iter_content(1024 * 64):
+                if chunk:
+                    tf.write(chunk)
+            tf.flush()
+            tf.close()
+            self._temp_downloaded = tf.name
+            return tf.name
+        except Exception as e:
+            try:
+                tf.close()
+                os.remove(tf.name)
+            except Exception:
+                pass
+            raise RuntimeError(f"Failed saving remote file: {e}")
 
     def convert_pdf_to_images(self):
         print("📄 Converting PDF to images...")
@@ -45,16 +89,9 @@ class MedicalOCRPipeline:
         if isinstance(pdf_path, str) and pdf_path.lower().startswith("http"):
             try:
                 print(f"🔽 Downloading remote PDF: {pdf_path}")
-                r = requests.get(pdf_path, stream=True, timeout=30)
-                r.raise_for_status()
-                suffix = ".pdf"
-                tf = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-                with tf as f:
-                    for chunk in r.iter_content(1024 * 64):
-                        if chunk:
-                            f.write(chunk)
-                temp_downloaded = tf.name
-                pdf_path = temp_downloaded
+                rpath = self._download_remote_file(pdf_path)
+                temp_downloaded = rpath
+                pdf_path = rpath
             except Exception as e:
                 raise RuntimeError(f"❌ Could not download PDF from URL: {e}")
 
@@ -75,14 +112,53 @@ class MedicalOCRPipeline:
         finally:
             doc.close()
             if temp_downloaded:
-                os.remove(temp_downloaded)  # Clean up temp file
+                try:
+                    os.remove(temp_downloaded)
+                except Exception:
+                    pass
 
 
     def verify_image(self):
+        """
+        Verify and load image into an OpenCV (BGR) numpy array.
+        Supports:
+         - local file paths
+         - http/https image URLs (downloads to temp file)
+         - PIL fallback if cv2.imread fails
+        Sets self.image_path to local path when a download occurred.
+        """
         print("🔍 Verifying image...")
-        img = cv2.imread(self.image_path)
+        # If image_path is a remote URL, download it first
+        if isinstance(self.image_path, str) and self.image_path.lower().startswith(("http://", "https://")):
+            try:
+                print(f"🔽 Detected remote image URL, downloading: {self.image_path}")
+                downloaded = self._download_remote_file(self.image_path)
+                self.image_path = downloaded
+            except Exception as e:
+                raise FileNotFoundError(f"❌ Could not download remote image: {e}")
+
+        # Expand user and normalize path
+        if isinstance(self.image_path, str):
+            self.image_path = os.path.expanduser(self.image_path)
+
+        # Basic existence check
+        if isinstance(self.image_path, str) and not os.path.exists(self.image_path):
+            raise FileNotFoundError(f"❌ Image file not found at path: {self.image_path}")
+
+        # Try cv2.imread first
+        img = cv2.imread(self.image_path, cv2.IMREAD_COLOR)
+        # If cv2 failed to load, try PIL
+        if img is None:
+            try:
+                print("⚠️ cv2.imread failed — attempting to open with PIL as fallback.")
+                pil_img = Image.open(self.image_path).convert("RGB")
+                img = np.array(pil_img)[:, :, ::-1]  # RGB -> BGR
+            except Exception as e:
+                raise FileNotFoundError(f"❌ Could not read the image (cv2 and PIL failed): {e}")
+
         if img is None:
             raise FileNotFoundError(f"❌ Could not read the image at {self.image_path}")
+
         print(f"✅ Successfully loaded image from: {self.image_path}")
         return img
 
@@ -236,6 +312,13 @@ class MedicalOCRPipeline:
 
         except Exception as e:
             print(f"\n❌ Pipeline failed: {e}")
+        finally:
+            # cleanup any single-file download created during processing
+            try:
+                if getattr(self, "_temp_downloaded", None) and os.path.exists(self._temp_downloaded):
+                    os.remove(self._temp_downloaded)
+            except Exception:
+                pass
 
 # --- Example Usage ---
 if __name__ == "__main__":

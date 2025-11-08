@@ -964,8 +964,10 @@ async def upload_intake_documents(
                         "s3_bucket": mongo_conn.s3_bucket,
                         "s3_region": mongo_conn.s3_region,
                         "uri": uri,
-                        "url": presigned_url,  # presigned URL for frontend immediate access
-                        "http_url": http_url,  # permanent HTTP URL to store in MongoDB (non-presigned)
+                        # Store the permanent HTTP URL (no query params) as the canonical url
+                        "url": http_url,
+                        # Provide the presigned URL separately for immediate frontend access
+                        "presigned_url": presigned_url,
                         "file_size": file_size,
                         "content_type": content_type,
                         "upload_timestamp": datetime.utcnow().isoformat()

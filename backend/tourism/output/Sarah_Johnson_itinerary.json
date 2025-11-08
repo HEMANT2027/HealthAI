@@ -1,0 +1,72 @@
+{
+    "HospitalRecommendations": [
+        {
+            "Name": "Medanta - The Medicity",
+            "City": "Gurugram (Delhi NCR)",
+            "Accreditation": "JCI, NABH",
+            "Specialization": "A multi-super specialty hospital with a world-class Institute of Dental Sciences for complex procedures like implants and a renowned Endocrinology and Diabetes department for thyroid management. Excellent international patient services.",
+            "ApproxTreatmentCost": "$2,500 - $4,000 (for 4 dental implants and endocrinology consultation/tests).",
+            "Website": "https://www.medanta.org/"
+        },
+        {
+            "Name": "Fortis Memorial Research Institute (FMRI)",
+            "City": "Gurugram (Delhi NCR)",
+            "Accreditation": "JCI, NABH",
+            "Specialization": "A leading multi-specialty hospital known for its advanced dental care center (Fortis Dental Care) and a comprehensive Department of Endocrinology. They are highly experienced in handling international patients with complex needs.",
+            "ApproxTreatmentCost": "$2,800 - $4,500 (for 4 dental implants and endocrinology consultation/tests).",
+            "Website": "https://www.fmri.in/"
+        },
+        {
+            "Name": "Max Super Speciality Hospital, Saket",
+            "City": "New Delhi",
+            "Accreditation": "JCI, NABH",
+            "Specialization": "Features a high-tech dental facility specializing in implantology and a dedicated endocrinology department. Max Healthcare is a trusted name for international patients seeking quality care.",
+            "ApproxTreatmentCost": "$2,600 - $4,200 (for 4 dental implants and endocrinology consultation/tests).",
+            "Website": "https://www.maxhealthcare.in/"
+        }
+    ],
+    "Itinerary": [
+        {
+            "Day": "Day 1: Arrival and Pre-Procedure Consultations",
+            "Activity": "Arrive at Indira Gandhi International Airport (DEL), Delhi. Transfer to your pre-booked hotel near the chosen hospital in Gurugram/Delhi. Proceed to the hospital for pre-scheduled appointments:\n1. Consultation with the Endocrinologist for thyroid assessment.\n2. Consultation with the Dental Surgeon for implant evaluation (includes X-rays/3D CBCT scan).\n3. Complete all required blood tests and pre-operative checks.",
+            "Notes": "CRITICAL: Inform every doctor and nurse about your latex and penicillin allergies at every step. Ensure it is marked prominently on your patient file. Carry a list of your current medications."
+        },
+        {
+            "Day": "Day 2: Medical Procedures",
+            "Activity": "Morning: Follow-up with the Endocrinologist to discuss test results and receive a detailed thyroid management plan and prescription.\nAfternoon: Undergo the dental implant surgery (Stage 1: Placement of 4 implants). The procedure will be performed under local anesthesia.",
+            "Notes": "This itinerary only covers Stage 1 of the dental implant process. You will need to return to India in 3-6 months for Stage 2 (placing the abutments and crowns) after the implants have integrated with the bone. The hospital's international patient desk can coordinate accommodation and transport."
+        },
+        {
+            "Day": "Day 3: Recovery",
+            "Activity": "Full day of rest at your hotel. You will likely experience mild swelling and discomfort from the dental surgery.",
+            "Notes": "Strictly adhere to the post-operative instructions from your surgeon. This includes medication, oral hygiene, and a diet of soft, cool foods. Avoid any strenuous activity. The hospital or hotel can provide suitable meals."
+        },
+        {
+            "Day": "Day 4: Post-Operative Check-up",
+            "Activity": "Morning: Visit the dental surgeon for a post-operative check-up to ensure the implant sites are healing well.\nAfternoon: Collect all medical reports, prescriptions, and a fit-to-fly certificate. Settle final bills at the hospital.",
+            "Notes": "Use this day to clarify any doubts about your medications, recovery process, and the plan for your return visit for the dental crowns. Ensure you have digital and physical copies of all your medical records."
+        },
+        {
+            "Day": "Day 5: Departure",
+            "Activity": "Check out from the hotel and transfer to Indira Gandhi International Airport (DEL) for your flight back to the United Kingdom.",
+            "Notes": "Ensure you carry all your medical documents and prescribed medications in your hand luggage."
+        }
+    ],
+    "RecoveryAndSightseeing": [
+        {
+            "Place": "No Sightseeing Recommended",
+            "WhyRecommended": "Given the tight 5-day schedule and recovery from dental surgery, sightseeing is not advised. Your priority should be rest to ensure proper healing and avoid complications before your long flight back to the UK.",
+            "NearbyDietaryOptions": "N/A"
+        },
+        {
+            "Place": "Optional: Short Drive to a local high-end Mall (e.g., Ambience Mall, Gurugram)",
+            "WhyRecommended": "If you are feeling exceptionally well on Day 4 and have been cleared by your doctor, a short, comfortable car ride to a nearby air-conditioned mall can offer a change of scenery without requiring any walking. You can sit in a quiet cafe for a short while. This is a low-exertion activity.",
+            "NearbyDietaryOptions": "The food courts in these malls offer a wide variety of international cuisines, including UK-friendly options. You can find smoothies, soups, and other soft foods suitable for post-operative recovery."
+        },
+        {
+            "Place": "Special Note on Dietary Needs",
+            "WhyRecommended": "The recommended hospitals (Medanta, Fortis, Max) have dedicated kitchens and dietitians who can cater to specific needs, including post-surgery soft diets and international patient palates. Most nearby 4-star and 5-star hotels also offer 24/7 room service with a variety of international and customizable meal options.",
+            "NearbyDietaryOptions": "Hospital cafes and nearby hotel restaurants can easily provide meals that are not spicy and meet general dietary requirements for a patient from the UK. No specific dietary restrictions were mentioned, but options are widely available."
+        }
+    ]
+}

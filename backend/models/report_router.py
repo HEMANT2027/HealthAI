@@ -121,7 +121,7 @@ async def get_intake_form_data(
 # Helper functions for threaded execution
 def _run_medical_ocr(image_url: str):
     pipeline = MedicalOCRPipeline(
-        image_path="WhatsApp Image 2025-10-28 at 17.34.20.jpeg",
+        image_path=image_url,
         gcp_key_path=GCP_KEY_PATH,
         gemini_api_key=os.getenv("GEMINI_API_KEY")
     )
@@ -192,39 +192,6 @@ async def extract_pdf_pathology_data(request: PDFPathologyExtractRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
-# @router.post("/medgemma/analyze")
-# async def analyze_with_medgemma(request: MedGemmaRequest):
-#     try:
-#         pipeline = MedGemmaTextPipeline(
-#             pathology_text=request.pathology_text,
-#             prescription_text=request.prescription_text,
-#             doctor_prompt=request.doctor_prompt,
-#             image_paths=request.image_data,
-#             endpoint_name=os.getenv("MEDGEMMA_ENDPOINT"),
-#             region_name=os.getenv("S3_REGION", "eu-north-1")
-#         )
-#         result = pipeline.run()
-#         generated_text = result[0].get("generated_text", "") if result else ""
-
-#         # Store final record in MongoDB
-#         record = {
-#             "pathology_text": request.pathology_text,
-#             "prescription_text": request.prescription_text,
-#             "medgemma_output": generated_text,
-#             "image_data": request.image_data,
-#             "doctor_prompt": request.doctor_prompt,
-#             "created_at": datetime.datetime.utcnow()
-#         }
-#         collection.insert_one(record)
-
-#         return {
-#             "status": "success",
-#             "medgemma_output": generated_text,
-#             "stored_record_id": str(record["_id"]) if "_id" in record else None
-#         }
-
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=f"MedGemma Analysis Failed: {str(e)}")
 
 @router.post("/analyze_medgemma")
 async def analyze_with_medgemma(payload: dict = Body(...)):
@@ -248,7 +215,7 @@ async def analyze_with_medgemma(payload: dict = Body(...)):
     if not images:
         raise HTTPException(status_code=400, detail="No images provided")
 
-    endpoint_name = os.getenv("MEDGEMMA_ENDPOINT") or "jumpstart-dft-hf-vlm-gemma-3-27b-in-20251028-060633"
+    endpoint_name = os.getenv("MEDGEMMA_ENDPOINT") or "jumpstart-dft-hf-vlm-gemma-3-4b-ins-20251031-123610"
     client = MedGemmaMultiInputClient(endpoint_name=endpoint_name)
 
     temp_files = []

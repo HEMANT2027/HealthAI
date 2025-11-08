@@ -46,3 +46,4 @@ langchain
 langchain_openai
 langchain_anthropic
 langchain_text_splitters
+langchain_chroma

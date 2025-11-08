@@ -5,6 +5,7 @@ from typing import List, Optional
 import os
 from dotenv import load_dotenv
 from .Mongo_connect import get_mongo_connection
+from urllib.parse import urlsplit, urlunsplit
 from .auth import authMiddleware
 
 load_dotenv()
@@ -26,6 +27,7 @@ except Exception as e:
 
 class DocumentInfo(BaseModel):
     url: str
+    presigned_url: Optional[str] = None
     fileName: str
     uploadedAt: str
     type: Optional[str] = None  # File type: prescription, pathology, scan
@@ -68,12 +70,23 @@ def format_intake_form(form: dict) -> dict:
                 "url": doc.get("url", ""),
                 "fileName": doc.get("fileName", ""),
                 "uploadedAt": doc.get("uploadedAt", ""),
-                "type": doc.get("type", "clinical_notes")  # Include file type
+                "type": doc.get("type", "clinical_notes")
             }
             for doc in form["documents"]
         ]
     
     return form
+
+# ---------- URL Sanitization Helper ----------
+def sanitize_s3_url(url: str) -> str:
+    """Strip query/fragment so URL ends cleanly at the file path/filename."""
+    try:
+        parts = urlsplit(url)
+        # Drop query and fragment
+        clean = urlunsplit((parts.scheme, parts.netloc, parts.path, '', ''))
+        return clean
+    except Exception:
+        return url
 
 # ---------- INTAKE FORM ENDPOINTS ----------
 
@@ -130,10 +143,10 @@ async def submit_intake_form(
             "notes": form_data.notes,
             "documents": [
                 {
-                    "url": doc.url,
+                    "url": sanitize_s3_url(doc.url or ""),
                     "fileName": doc.fileName,
                     "uploadedAt": doc.uploadedAt,
-                    "type": doc.type or "clinical_notes"  # Store file type
+                    "type": doc.type or "clinical_notes"
                 }
                 for doc in form_data.documents
             ],

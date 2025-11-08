@@ -2,7 +2,7 @@ from langgraph.graph import StateGraph, END, START
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.messages import AnyMessage, AIMessage, HumanMessage
 from typing_extensions import TypedDict, Annotated
-from langchain_openai import OpenAIEmbeddings
+from langchain_openai import OpenAIEmbeddings,ChatOpenAI
 from langchain_anthropic import ChatAnthropic
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -106,13 +106,7 @@ def save_analysis_results(state: MessageState, cached_doc: dict = None):
 # ==========================================================
 
 try:
-    llm = ChatAnthropic(
-        model_name="claude-3-5-sonnet-20241022",
-        temperature=0,
-        timeout=60,
-        max_retries=3,
-        stop=None
-    )
+    llm = ChatOpenAI()
 except Exception as e:
     raise RuntimeError("Error initializing Anthropic LLM") from e
 
@@ -368,7 +362,7 @@ You assist doctors by synthesizing information into structured, clinically usefu
 # ==========================================================
 
 def fuse_reports(state: MessageState) -> MessageState:
-    """Step 5: Combine multiple model reports into one unified clinical summary."""
+    """Step 5: Combine reports into unified summary."""
     print("\n================ Report Fusion Stage ================")
 
     ocr = state.get("ocr_result", "")
@@ -378,28 +372,31 @@ def fuse_reports(state: MessageState) -> MessageState:
 
     prompt = PromptTemplate.from_template(
         """
-        You are a clinical report synthesizer.
-        Combine the following separate analyses into one coherent medical summary:
+You are a  AI clinical Medical expert .Further doctor will ask you some question based on this report as well his general knowledge about the same .
+        Your work is to answer him in concise and precise manner as well think before you answer about the question .
+       This is the context for thresponses .Don't solely stick on them but use your general medical knowledge as well to answer the doctor in best possible manner .
+            Use the following extracted data to write a concise medical summary for a doctor.
+--- OCR Prescription ---
+{ocr}
 
-        --- OCR Extracted Text ---
-        {ocr}
+--- Medical Entities (NER) ---
+{ner}
 
-        --- NER Entities ---
-        {ner}
+--- Pathology Report ---
+{patho}
 
-        --- Pathology Report ---
-        {patho}
+--- MedGemma Analysis ---
+{medgemma}
 
-        --- MedGemma / Multimodal Summary ---
-        {medgemma}
+**Output Format:**
+1. Primary Diagnosis:
+2. Key Lab Findings:
+3. Imaging Findings:
+4. Current Medications:
+5. Recommendations:
 
-        Produce a structured JSON summary including:
-        - Chief Findings
-        - Possible Diagnoses
-        - Medications
-        - Recommended Follow-ups
-        - Key Observations
-        """
+Be concise and factual.
+"""
     )
 
     try:
@@ -416,7 +413,6 @@ def fuse_reports(state: MessageState) -> MessageState:
         state["fused_report"] = ""
 
     return state
-
 
 # ==========================================================
 # 📹 Build Complete RAG Workflow with Checkpointing
