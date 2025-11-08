@@ -12,6 +12,7 @@ import Profile from './pages/Profile'
 import Chatbot from './pages/Chatbot'
 import  AdminDashboard  from './pages/Admindashboard'
 import Test from './pages/test'
+import ReportAGUI from './pages/ReportAGUI'
 // Protected Route Component
 function ProtectedRoute({ children, allowedRoles }) {
   const token = localStorage.getItem('token')
@@ -151,7 +152,7 @@ function App() {
                 path="/reports/:patientId" 
                 element={
                   <ProtectedRoute allowedRoles={['doctor']}>
-                  <Report />
+                  <ReportAGUI />
                   </ProtectedRoute>
                 } 
                 />
