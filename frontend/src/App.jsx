@@ -12,7 +12,6 @@ import Profile from './pages/Profile'
 import Chatbot from './pages/Chatbot'
 import  AdminDashboard  from './pages/Admindashboard'
 import Test from './pages/test'
-
 // Protected Route Component
 function ProtectedRoute({ children, allowedRoles }) {
   const token = localStorage.getItem('token')
