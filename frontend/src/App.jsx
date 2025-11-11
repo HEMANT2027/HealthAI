@@ -5,13 +5,13 @@ import Login from './pages/Login'
 import Home from './pages/Home'
 import IntakeForm from './pages/IntakeForm'
 import Navbar from './components/Navbar'
-import Footer from './components/Footer'
 import DoctorPanel from './pages/DoctorPanel'
 import Report from './pages/Report'
 import Profile from './pages/Profile'
 import Chatbot from './pages/Chatbot'
 import  AdminDashboard  from './pages/Admindashboard'
-import Test from './pages/test'
+import PatientForm from './pages/CreatePatient'
+import Main from './pages/Main'
 // Protected Route Component
 function ProtectedRoute({ children, allowedRoles }) {
   const token = localStorage.getItem('token')
@@ -119,7 +119,7 @@ function App() {
       <Routes>
         <Route element={<Layout />}>
           <Route path="/" element={<Home />} />
-          <Route path="/test" element={<Test/>} />
+          <Route path="/home" element={<Main />} />
           {/* Patient Only Routes */}
           <Route 
             path="/intake" 
@@ -144,6 +144,14 @@ function App() {
                 element={
                   <ProtectedRoute allowedRoles={['doctor']}>
                   <DoctorPanel />
+                  </ProtectedRoute>
+                } 
+                />
+                <Route 
+                path="/form" 
+                element={
+                  <ProtectedRoute allowedRoles={['doctor']}>
+                  <PatientForm />
                   </ProtectedRoute>
                 } 
                 />

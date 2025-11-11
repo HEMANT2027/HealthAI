@@ -68,3 +68,23 @@ body {
   animation: scroll 30s linear infinite;
   will-change: transform;
 }
+
+/* Floating animation for hero graphics */
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-20px) rotate(5deg);
+  }
+}
+
+/* Progress bar animation */
+@keyframes progress {
+  0%, 100% {
+    opacity: 0.8;
+  }
+  50% {
+    opacity: 1;
+  }
+}

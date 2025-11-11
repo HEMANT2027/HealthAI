@@ -168,92 +168,142 @@ async def process_intake_streaming(
                 return
             
             documents = intake_form.get("documents", [])
-            prescription_file = next((doc for doc in documents if doc.get("type") == "prescription"), None)
-            pathology_file = next((doc for doc in documents if doc.get("type") == "pathology"), None)
+            prescription_files = [doc for doc in documents if doc.get("type") == "prescription"]
+            pathology_files = [doc for doc in documents if doc.get("type") == "pathology"]
             scan_files = [doc for doc in documents if doc.get("type") == "scan"]
             
             prescription_text = ""
             pathology_text = ""
+            prescription_results = []
+            pathology_results = []
             
-            # ✅ Process Prescription OCR (First, with streaming)
-            if prescription_file:
+            # ✅ Process Multiple Prescription OCRs (First, with streaming)
+            if prescription_files:
                 yield encoder.encode({
                     "type": EventType.PRESCRIPTION_STARTED,
+                    "total_files": len(prescription_files),
                     "timestamp": datetime.utcnow().isoformat()
                 })
                 
-                try:
-                    # Run OCR in thread
-                    prescription_text = await asyncio.to_thread(
-                        _run_medical_ocr,
-                        prescription_file.get("url")
-                    )
-                    
-                    # Stream the result in chunks
-                    chunk_size = 100
-                    for i in range(0, len(prescription_text), chunk_size):
-                        chunk = prescription_text[i:i + chunk_size]
+                for idx, prescription_file in enumerate(prescription_files, 1):
+                    try:
                         yield encoder.encode({
                             "type": EventType.PRESCRIPTION_CHUNK,
-                            "delta": chunk
+                            "delta": f"\n\n=== Processing Prescription {idx}/{len(prescription_files)}: {prescription_file.get('fileName', 'Unknown')} ===\n\n"
                         })
-                        await asyncio.sleep(0.03)
-                    
-                    yield encoder.encode({
-                        "type": EventType.PRESCRIPTION_FINISHED,
-                        "content": prescription_text,
-                        "timestamp": datetime.utcnow().isoformat()
-                    })
-                    
-                except Exception as e:
-                    error_msg = f"Error processing prescription: {str(e)}"
-                    prescription_text = error_msg
-                    yield encoder.encode({
-                        "type": EventType.PRESCRIPTION_FINISHED,
-                        "content": error_msg,
-                        "error": True,
-                        "timestamp": datetime.utcnow().isoformat()
-                    })
+                        
+                        # Run OCR in thread
+                        file_text = await asyncio.to_thread(
+                            _run_medical_ocr,
+                            prescription_file.get("url")
+                        )
+                        
+                        prescription_results.append({
+                            "file_name": prescription_file.get("fileName", "Unknown"),
+                            "file_url": prescription_file.get("url"),
+                            "text": file_text
+                        })
+                        
+                        # Stream the result in chunks
+                        chunk_size = 100
+                        for i in range(0, len(file_text), chunk_size):
+                            chunk = file_text[i:i + chunk_size]
+                            yield encoder.encode({
+                                "type": EventType.PRESCRIPTION_CHUNK,
+                                "delta": chunk
+                            })
+                            await asyncio.sleep(0.03)
+                        
+                    except Exception as e:
+                        error_msg = f"Error processing prescription {idx}: {str(e)}"
+                        prescription_results.append({
+                            "file_name": prescription_file.get("fileName", "Unknown"),
+                            "file_url": prescription_file.get("url"),
+                            "text": error_msg,
+                            "error": True
+                        })
+                        yield encoder.encode({
+                            "type": EventType.PRESCRIPTION_CHUNK,
+                            "delta": f"\n\n❌ {error_msg}\n\n"
+                        })
+                
+                # Combine all prescription texts
+                prescription_text = "\n\n".join([
+                    f"=== {r['file_name']} ===\n{r['text']}" 
+                    for r in prescription_results
+                ])
+                
+                yield encoder.encode({
+                    "type": EventType.PRESCRIPTION_FINISHED,
+                    "content": prescription_text,
+                    "files_processed": len(prescription_files),
+                    "results": prescription_results,
+                    "timestamp": datetime.utcnow().isoformat()
+                })
             
-            # ✅ Process Pathology OCR (Second, with streaming)
-            if pathology_file:
+            # ✅ Process Multiple Pathology OCRs (Second, with streaming)
+            if pathology_files:
                 yield encoder.encode({
                     "type": EventType.PATHOLOGY_STARTED,
+                    "total_files": len(pathology_files),
                     "timestamp": datetime.utcnow().isoformat()
                 })
                 
-                try:
-                    # Run OCR in thread
-                    pathology_text = await asyncio.to_thread(
-                        _run_pathology_ocr,
-                        pathology_file.get("url")
-                    )
-                    
-                    # Stream the result in chunks
-                    chunk_size = 100
-                    for i in range(0, len(pathology_text), chunk_size):
-                        chunk = pathology_text[i:i + chunk_size]
+                for idx, pathology_file in enumerate(pathology_files, 1):
+                    try:
                         yield encoder.encode({
                             "type": EventType.PATHOLOGY_CHUNK,
-                            "delta": chunk
+                            "delta": f"\n\n=== Processing Pathology Report {idx}/{len(pathology_files)}: {pathology_file.get('fileName', 'Unknown')} ===\n\n"
                         })
-                        await asyncio.sleep(0.03)
-                    
-                    yield encoder.encode({
-                        "type": EventType.PATHOLOGY_FINISHED,
-                        "content": pathology_text,
-                        "timestamp": datetime.utcnow().isoformat()
-                    })
-                    
-                except Exception as e:
-                    error_msg = f"Error processing pathology: {str(e)}"
-                    pathology_text = error_msg
-                    yield encoder.encode({
-                        "type": EventType.PATHOLOGY_FINISHED,
-                        "content": error_msg,
-                        "error": True,
-                        "timestamp": datetime.utcnow().isoformat()
-                    })
+                        
+                        # Run OCR in thread
+                        file_text = await asyncio.to_thread(
+                            _run_pathology_ocr,
+                            pathology_file.get("url")
+                        )
+                        
+                        pathology_results.append({
+                            "file_name": pathology_file.get("fileName", "Unknown"),
+                            "file_url": pathology_file.get("url"),
+                            "text": file_text
+                        })
+                        
+                        # Stream the result in chunks
+                        chunk_size = 100
+                        for i in range(0, len(file_text), chunk_size):
+                            chunk = file_text[i:i + chunk_size]
+                            yield encoder.encode({
+                                "type": EventType.PATHOLOGY_CHUNK,
+                                "delta": chunk
+                            })
+                            await asyncio.sleep(0.03)
+                        
+                    except Exception as e:
+                        error_msg = f"Error processing pathology report {idx}: {str(e)}"
+                        pathology_results.append({
+                            "file_name": pathology_file.get("fileName", "Unknown"),
+                            "file_url": pathology_file.get("url"),
+                            "text": error_msg,
+                            "error": True
+                        })
+                        yield encoder.encode({
+                            "type": EventType.PATHOLOGY_CHUNK,
+                            "delta": f"\n\n❌ {error_msg}\n\n"
+                        })
+                
+                # Combine all pathology texts
+                pathology_text = "\n\n".join([
+                    f"=== {r['file_name']} ===\n{r['text']}" 
+                    for r in pathology_results
+                ])
+                
+                yield encoder.encode({
+                    "type": EventType.PATHOLOGY_FINISHED,
+                    "content": pathology_text,
+                    "files_processed": len(pathology_files),
+                    "results": pathology_results,
+                    "timestamp": datetime.utcnow().isoformat()
+                })
             
             # ✅ Load Scan Images
             scan_images = [
@@ -274,7 +324,12 @@ async def process_intake_streaming(
                 "runId": run_id,
                 "prescription_text": prescription_text,
                 "pathology_text": pathology_text,
+                "prescription_results": prescription_results,
+                "pathology_results": pathology_results,
                 "scan_images": scan_images,
+                "total_prescriptions": len(prescription_files),
+                "total_pathology_reports": len(pathology_files),
+                "total_scans": len(scan_images),
                 "timestamp": datetime.utcnow().isoformat()
             })
             
