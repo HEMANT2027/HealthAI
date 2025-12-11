@@ -74,7 +74,7 @@ function Login() {
                   to="/"
                   className="text-teal-300 hover:text-vibrant-orange transition-colors duration-300 underline-offset-4 hover:underline"
                 >
-                  MedicoTourism
+                  HealthAI
                 </Link>
               </h1>
               <p className="mt-4 text-xl text-blue-100">Continue exploring the world along with treatment and recovery.</p>

@@ -3,11 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 
 // ✅ Stepper component
 function Stepper({ step }) {
-  const items = [
-    "Prescription OCR", 
-    "Scan Region Select", 
-    "Overall Report"
-  ];
+  const items = ["Prescription OCR", "Scan Region Select", "Overall Report"];
 
   return (
     <ol className="flex flex-wrap gap-3">
@@ -18,19 +14,14 @@ function Stepper({ step }) {
           <li
             key={label}
             className={`flex items-center gap-2 px-3 py-1 rounded-full border text-sm ${
-              active
-                ? "border-vibrant-blue text-vibrant-blue bg-blue-50"
-                : done
-                ? "border-green-300 text-green-700 bg-green-50"
+              active ? "border-vibrant-blue text-vibrant-blue bg-blue-50"
+                : done ? "border-green-300 text-green-700 bg-green-50"
                 : "border-gray-200 text-gray-600 bg-white"
             }`}
           >
-            <span
-              className={`w-5 h-5 rounded-full flex items-center justify-center text-xs ${
-                active
-                  ? "bg-vibrant-blue text-white"
-                  : done
-                  ? "bg-green-500 text-white"
+            <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs ${
+                active ? "bg-vibrant-blue text-white"
+                  : done ? "bg-green-500 text-white"
                   : "bg-gray-200 text-gray-700"
               }`}
             >
@@ -44,173 +35,201 @@ function Stepper({ step }) {
   );
 }
 
-function Reports() {
+function ReportAGUI() {
   const navigate = useNavigate();
   const location = useLocation();
-  
   const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
   
-  // Extract pseudonym_id from URL or location state
-  // Extract pseudonym_id from the URL path, e.g. /reports/P-1283-9D93
   const pathParts = location.pathname.split("/");
   const pseudonym_id = pathParts[pathParts.length - 1] || location.state?.pseudonym_id;
 
-  const initialPrescriptionOCR = useMemo(() => []);
-
-  // Sample medical scan images - will be replaced with actual data from backend
-  const [sampleImages, setSampleImages] = useState([
-    {
-      id: 1,
-      url: "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTpqQRADz6LD9XBSjZq9EqqAQrEfg9kCrir4w&s",
-      name: "Chest X-Ray",
-    }
-  ]);
-
+  const [sampleImages, setSampleImages] = useState([]);
   const [step, setStep] = useState(0);
-  const [prescriptionOCR, setPrescriptionOCR] = useState(initialPrescriptionOCR);
-  const [pathologyOCR, setPathologyOCR] = useState();
+  const [prescriptionOCR, setPrescriptionOCR] = useState("");
+  const [pathologyOCR, setPathologyOCR] = useState("");
+  const [extractedMedicines, setExtractedMedicines] = useState([]); // Medicines from prescription
+  const [suggestedMedicines, setSuggestedMedicines] = useState([]); // AI-suggested medicines
+  const [streamingPrescription, setStreamingPrescription] = useState("");
+  const [streamingPathology, setStreamingPathology] = useState("");
+  const [isPrescriptionLoading, setIsPrescriptionLoading] = useState(false);
+  const [isPathologyLoading, setIsPathologyLoading] = useState(false);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [imageRegions, setImageRegions] = useState({});
   const [redoStack, setRedoStack] = useState({});
-  const [regionAnalysis, setRegionAnalysis] = useState("");
   const [overallReport, setOverallReport] = useState("");
-  const [analysisError, setAnalysisError] = useState("");
   const [savedReportId, setSavedReportId] = useState(null);
   const [processing, setProcessing] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
-
-  // Fetch intake form data on component mount
-  useEffect(() => {
-    const fetchIntakeFormData = async () => {
-      if (!pseudonym_id) {
-        console.error("No pseudonym_id provided");
-        setLoading(false);
-        return;
-      }
-
-      try {
-        const token = localStorage.getItem('token');
-        const response = await fetch(
-          `${API_BASE_URL}/report/intake-form/${pseudonym_id}`,
-          {
-            headers: {
-              'Authorization': `Bearer ${token}`
-            }
-          }
-        );
-
-        if (!response.ok) {
-          throw new Error(`Failed to fetch intake form data: ${response.statusText}`);
-        }
-
-        const data = await response.json();
-        console.log("Fetched intake form data:", data);
-
-        // Update prescription OCR if available
-        if (data.prescription_ocr) {
-          setPrescriptionOCR(data.prescription_ocr);
-        }
-
-        // Store pathology OCR
-        if (data.pathology_ocr) {
-          setPathologyOCR(data.pathology_ocr);
-        }
-
-        // Update scan images if available (flag whether entry is an image)
-        if (data.scan_images && data.scan_images.length > 0) {
-          // map possible URL fields and conservative image flag based on extension
-          const mapped = data.scan_images.map((img, index) => {
-            const url = img.url || img.http_url || img.uri || img.presigned_url || "";
-            return {
-              id: index + 1,
-              url,
-              name: img.name || img.original_filename || `Scan ${index + 1}`,
-            };
-          });
-
-          console.log("Mapped scan images:", mapped);
-          setSampleImages(mapped);
-          console.log(sampleImages);
-        }
-
-        setLoading(false);
-      } catch (error) {
-        console.error("Error fetching intake form data:", error);
-        setLoading(false);
-      }
-    };
-
-    fetchIntakeFormData();
-  }, [pseudonym_id, API_BASE_URL]);
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
 
   const canvasRef = useRef(null);
   const [drawing, setDrawing] = useState(false);
   const [startPos, setStartPos] = useState(null);
+  const abortControllerRef = useRef(null);
 
   const currentImage = sampleImages[currentImageIndex];
   const selectedRegions = imageRegions[currentImage?.id] || [];
 
-  // Generate overall report when moving to step 2
-  useEffect(() => {
-    if (step === 2 && !overallReport) {
-      generateOverallReport();
+  // Parse AGUI streaming events
+  const parseAGUIEvent = (line) => {
+    try {
+      if (line.startsWith("data: ")) {
+        return JSON.parse(line.slice(6));
+      }
+      return JSON.parse(line);
+    } catch (e) {
+      return null;
     }
-  }, [step]);
-
-  const generateOverallReport = () => {
-    let report = `COMPREHENSIVE MEDICAL REPORT\n`;
-    report += `Patient: Alex Johnson\n`;
-    report += `Report Date: ${new Date().toLocaleDateString()}\n`;
-    report += `Report ID: RPT-${Date.now()}\n\n`;
-    
-    report += `═══════════════════════════════════════\n`;
-    report += `1. PRESCRIPTION SUMMARY\n`;
-    report += `═══════════════════════════════════════\n`;
-    report += `Current medications prescribed for chronic knee pain management.\n`;
-    report += `Key medications: Ibuprofen (anti-inflammatory), Glucosamine (joint support)\n\n`;
-    
-    report += `═══════════════════════════════════════\n`;
-    report += `2. LABORATORY FINDINGS\n`;
-    report += `═══════════════════════════════════════\n`;
-    report += `⚠️ NOTABLE FINDINGS:\n`;
-    report += `- Elevated C-Reactive Protein (8.5 mg/L) - indicates active inflammation\n`;
-    report += `- Elevated ESR (22 mm/hr) - supports inflammatory condition\n`;
-    report += `- Blood count and lipid profile within normal limits\n\n`;
-    
-    report += `═══════════════════════════════════════\n`;
-    report += `3. IMAGING ANALYSIS\n`;
-    report += `═══════════════════════════════════════\n`;
-    report += `Total scans reviewed: ${Object.keys(imageRegions).length}\n`;
-    report += `Regions of interest identified: ${getTotalRegions()}\n`;
-    report += `All marked regions require specialist evaluation.\n\n`;
-    
-    report += `═══════════════════════════════════════\n`;
-    report += `4. CLINICAL ASSESSMENT\n`;
-    report += `═══════════════════════════════════════\n`;
-    report += `The patient presents with:\n`;
-    report += `- Chronic inflammatory condition (confirmed by lab markers)\n`;
-    report += `- Multiple areas of concern on imaging studies\n`;
-    report += `- Currently on appropriate anti-inflammatory therapy\n\n`;
-    
-    report += `═══════════════════════════════════════\n`;
-    report += `5. RECOMMENDATIONS\n`;
-    report += `═══════════════════════════════════════\n`;
-    report += `1. Continue current medication regimen\n`;
-    report += `2. Specialist consultation for imaging findings\n`;
-    report += `3. Follow-up inflammatory markers in 4 weeks\n`;
-    report += `4. Consider additional imaging if symptoms persist\n`;
-    report += `5. Maintain physiotherapy and lifestyle modifications\n\n`;
-    
-    report += `Report compiled by: MedicoTourism AI System\n`;
-    report += `Status: Pending physician review and approval\n`;
-    
-    setOverallReport(report);
   };
 
-  // ✅ Load and draw image on canvas
+  // Fetch intake form data with AGUI streaming on component mount
+  useEffect(() => {
+    const fetchIntakeFormDataAGUI = async () => {
+      if (!pseudonym_id || initialLoadComplete) return;
+
+      try {
+        setLoading(true);
+        setIsPrescriptionLoading(true);
+        
+        abortControllerRef.current = new AbortController();
+        const token = localStorage.getItem('token');
+        
+        const response = await fetch(`${API_BASE_URL}/report-agent`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'text/event-stream',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ pseudonym_id }),
+          signal: abortControllerRef.current.signal
+        });
+
+        if (!response.ok) throw new Error('Failed to fetch intake form data');
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let prescriptionAccumulated = "";
+        let pathologyAccumulated = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+
+            const event = parseAGUIEvent(line);
+            if (!event) continue;
+
+            switch (event.type) {
+              case "run_started":
+                console.log("Processing started");
+                break;
+
+              case "prescription_started":
+                setIsPrescriptionLoading(true);
+                setStreamingPrescription("");
+                break;
+
+              case "prescription_chunk":
+                if (event.delta) {
+                  prescriptionAccumulated += event.delta;
+                  setStreamingPrescription(prescriptionAccumulated);
+                }
+                break;
+
+              case "prescription_finished":
+                setPrescriptionOCR(event.content || prescriptionAccumulated);
+                setStreamingPrescription("");
+                setIsPrescriptionLoading(false);
+                setLoading(false); // Show UI after prescription is done
+                // Store both types of medicines if available
+                if (event.extracted_medicines && Array.isArray(event.extracted_medicines)) {
+                  setExtractedMedicines(event.extracted_medicines);
+                }
+                if (event.suggested_medicines && Array.isArray(event.suggested_medicines)) {
+                  setSuggestedMedicines(event.suggested_medicines);
+                }
+                break;
+
+              case "pathology_started":
+                setIsPathologyLoading(true);
+                setStreamingPathology("");
+                break;
+
+              case "pathology_chunk":
+                if (event.delta) {
+                  pathologyAccumulated += event.delta;
+                  setStreamingPathology(pathologyAccumulated);
+                }
+                break;
+
+              case "pathology_finished":
+                setPathologyOCR(event.content || pathologyAccumulated);
+                setStreamingPathology("");
+                setIsPathologyLoading(false);
+                break;
+
+              case "scans_loaded":
+                if (event.scans && event.scans.length > 0) {
+                  const mapped = event.scans.map((img, index) => ({
+                    id: index + 1,
+                    url: img.url,
+                    name: img.name || `Scan ${index + 1}`
+                  }));
+                  setSampleImages(mapped);
+                }
+                break;
+
+              case "run_finished":
+                setInitialLoadComplete(true);
+                // Also capture medicines from run_finished event if not already set
+                if (event.extracted_medicines && Array.isArray(event.extracted_medicines) && extractedMedicines.length === 0) {
+                  setExtractedMedicines(event.extracted_medicines);
+                }
+                if (event.suggested_medicines && Array.isArray(event.suggested_medicines) && suggestedMedicines.length === 0) {
+                  setSuggestedMedicines(event.suggested_medicines);
+                }
+                break;
+
+              case "error":
+                console.error("AGUI Error:", event.error);
+                setLoading(false);
+                setIsPrescriptionLoading(false);
+                setIsPathologyLoading(false);
+                break;
+            }
+          }
+        }
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          console.error("Error fetching intake form data:", err);
+        }
+        setLoading(false);
+        setIsPrescriptionLoading(false);
+        setIsPathologyLoading(false);
+      }
+    };
+
+    fetchIntakeFormDataAGUI();
+
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, [pseudonym_id, API_BASE_URL]);
+
+  // Canvas drawing effects
   useEffect(() => {
     if (step !== 1 || !canvasRef.current) return;
 
@@ -239,8 +258,7 @@ function Reports() {
       setImageLoaded(true);
     };
 
-    img.onerror = (ev) => {
-      console.error("Image failed to load:", currentImage?.url, ev);
+    img.onerror = () => {
       canvas.width = 600;
       canvas.height = 400;
       ctx.fillStyle = "#f1f5f9";
@@ -394,7 +412,6 @@ function Reports() {
   };
 
   const buildPayloadForMedGemma = () => {
-    // Compose image list with regions in pixel coordinates
     const images = (sampleImages || []).map((img) => {
       const regions = (imageRegions[img.id] || []).map((r) => ({
         x: Math.round(r.x),
@@ -408,11 +425,102 @@ function Reports() {
       images,
       prescription_text: prescriptionOCR || "",
       pathology_text: pathologyOCR || "",
-      doctor_prompt: "Please analyze the selected regions and summarize clinical findings.",
     };
   };
 
-  // Function to save analysis to MongoDB
+  const [streamingAnalysis, setStreamingAnalysis] = useState("");
+  const [analysisProgress, setAnalysisProgress] = useState(0);
+  const [analysisMessage, setAnalysisMessage] = useState("");
+
+  const analyzeWithMedGemma = async () => {
+    try {
+      setAnalysisLoading(true);
+      setStreamingAnalysis("");
+      setAnalysisProgress(0);
+      setAnalysisMessage("");
+      
+      const token = localStorage.getItem("token");
+      const payload = buildPayloadForMedGemma();
+
+      const resp = await fetch(`${API_BASE_URL}/report-agent/analyze-medgemma`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "text/event-stream",
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.detail || `Status ${resp.status}`);
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let accumulatedAnalysis = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+
+          const event = parseAGUIEvent(line);
+          if (!event) continue;
+
+          switch (event.type) {
+            case "analysis_started":
+              console.log("MedGemma analysis started");
+              break;
+
+            case "analysis_progress":
+              setAnalysisProgress(event.progress || 0);
+              setAnalysisMessage(event.message || "");
+              break;
+
+            case "analysis_chunk":
+              if (event.delta) {
+                accumulatedAnalysis += event.delta;
+                setStreamingAnalysis(accumulatedAnalysis);
+              }
+              break;
+
+            case "analysis_finished":
+              setOverallReport(event.content || accumulatedAnalysis);
+              setStreamingAnalysis("");
+              setAnalysisLoading(false);
+              setAnalysisProgress(100);
+              break;
+
+            case "error":
+              console.error("MedGemma Error:", event.error);
+              setOverallReport("Analysis failed: " + event.error);
+              setAnalysisLoading(false);
+              break;
+          }
+        }
+      }
+    } catch (err) {
+      console.error("MedGemma analysis failed:", err);
+      setOverallReport("Analysis failed: " + (err.message || "unknown error"));
+      setAnalysisLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (step === 2 && !overallReport) {
+      analyzeWithMedGemma();
+    }
+  }, [step]);
+
   const saveAnalysisToDb = async () => {
     if (!pseudonym_id) return;
     setProcessing(true);
@@ -424,6 +532,8 @@ function Reports() {
         prescription_ocr: prescriptionOCR,
         pathology_ocr: pathologyOCR,
         medgemma_analysis: overallReport,
+        extracted_medicines: extractedMedicines, // Medicines from prescription
+        suggested_medicines: suggestedMedicines, // AI-suggested medicines
         images: sampleImages.map(img => ({
           url: img.url,
           name: img.name,
@@ -435,7 +545,7 @@ function Reports() {
         }
       };
 
-      const response = await fetch(`${API_BASE_URL}/report/save-analysis`, {
+      const response = await fetch(`${API_BASE_URL}/report-agent/save-analysis`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -456,56 +566,9 @@ function Reports() {
 
     } catch (err) {
       console.error('Failed to save analysis:', err);
-      setAnalysisError(err.message || 'Failed to save analysis');
+      setProcessing(false);
     }
   };
-
-  // Update analyzeWithMedGemma to save results after analysis
-  const analyzeWithMedGemma = async () => {
-    try {
-      setAnalysisLoading(true);
-      setAnalysisError("");
-      setLoading(true);
-      
-      const token = localStorage.getItem("token");
-      const payload = buildPayloadForMedGemma();
-
-      const resp = await fetch(`${API_BASE_URL}/report/analyze_medgemma`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {})
-        },
-        body: JSON.stringify(payload)
-      });
-
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err.detail || `Status ${resp.status}`);
-      }
-
-      const data = await resp.json();
-      if (data && data.analysis) {
-        setOverallReport(String(data.analysis));
-      } else {
-        setOverallReport("No analysis returned from model.");
-      }
-      setLoading(false);
-      setAnalysisLoading(false);
-    } catch (err) {
-      console.error("MedGemma analysis failed:", err);
-      setOverallReport("Analysis failed: " + (err.message || "unknown error"));
-      setLoading(false);
-      setAnalysisLoading(false);
-    }
-  };
-
-  // Trigger analysis when user navigates to Overall Report step (index 2)
-  useEffect(() => {
-    if (step === 2) {
-      analyzeWithMedGemma();
-    }
-  }, [step]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-200 via-white to-teal-100">
@@ -554,7 +617,6 @@ function Reports() {
                     state: { 
                       prescriptionOCR, 
                       pathologyOCR, 
-                      regionAnalysis, 
                       overallReport,
                       imageRegions 
                     } 
@@ -568,23 +630,48 @@ function Reports() {
           ) : (
             <>
               <div className="mt-4">
-                {/* Step 0: Prescription OCR */}
                 {step === 0 && (
                   <div>
                     <div className="mb-4">
                       <h2 className="text-xl font-bold text-gray-900 mb-2">📋 Prescription OCR</h2>
                       <p className="text-sm text-gray-600">Review and edit the extracted prescription text</p>
                     </div>
+                    
+                    {isPrescriptionLoading && (
+                      <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                        <div className="flex items-center gap-3">
+                          <div className="flex gap-1">
+                            <span className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                            <span className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                            <span className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                          </div>
+                          <span className="text-sm text-blue-700">Processing prescription OCR...</span>
+                        </div>
+                      </div>
+                    )}
+
                     <textarea
-                      value={prescriptionOCR}
+                      value={streamingPrescription || prescriptionOCR}
                       onChange={(e) => setPrescriptionOCR(e.target.value)}
                       className="w-full h-96 p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-vibrant-blue font-mono text-sm"
                       placeholder="Prescription details will appear here..."
                     />
+
+                    {isPathologyLoading && (
+                      <div className="mt-4 p-4 bg-purple-50 border border-purple-200 rounded-lg">
+                        <div className="flex items-center gap-3">
+                          <div className="flex gap-1">
+                            <span className="w-2 h-2 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                            <span className="w-2 h-2 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                            <span className="w-2 h-2 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                          </div>
+                          <span className="text-sm text-purple-700">Processing pathology report in background, till then verify if prescription is correct</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
-                {/* Step 1: Scan Region Select */}
                 {step === 1 && (
                   <div className="flex flex-col items-center gap-4">
                     <div className="mb-4 text-center">
@@ -592,7 +679,19 @@ function Reports() {
                       <p className="text-sm text-gray-600">Mark regions of interest on the medical scans</p>
                     </div>
 
-                    <div className="w-full flex items-center justify-between bg-gray-50 p-4 rounded-lg">
+                    {sampleImages.length === 0 || !currentImage?.url ? (
+                      <div className="w-full flex flex-col items-center justify-center py-20 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
+                        <svg className="w-16 h-16 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                        <h3 className="text-lg font-semibold text-gray-700 mb-2">No Scans Available</h3>
+                        <p className="text-sm text-gray-500 text-center max-w-md">
+                          No medical scan images have been uploaded for this patient. Please upload scan images in the intake form to enable region selection.
+                        </p>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="w-full flex items-center justify-between bg-gray-50 p-4 rounded-lg">
                       <div className="flex items-center gap-3">
                         <button
                           onClick={() => setCurrentImageIndex((prev) => Math.max(0, prev - 1))}
@@ -602,7 +701,7 @@ function Reports() {
                           ← Previous
                         </button>
                         <div className="text-sm font-medium text-gray-700">
-                          <span className="text-vibrant-blue font-bold">{currentImage.name}</span>
+                          <span className="text-vibrant-blue font-bold">{currentImage?.name}</span>
                           <span className="text-gray-500 ml-2">
                             ({currentImageIndex + 1} of {sampleImages.length})
                           </span>
@@ -630,7 +729,7 @@ function Reports() {
                       </button>
                       <button
                         onClick={handleRedo}
-                        disabled={(redoStack[currentImage.id] || []).length === 0}
+                        disabled={(redoStack[currentImage?.id] || []).length === 0}
                         className="text-sm px-4 py-2 border rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition"
                       >
                         ↪ Redo
@@ -651,36 +750,38 @@ function Reports() {
                         </div>
                       )}
 
-                        <canvas
-                          ref={canvasRef}
-                          onMouseDown={handleMouseDown}
-                          onMouseMove={handleMouseMove}
-                          onMouseUp={handleMouseUp}
-                          onMouseLeave={() => setDrawing(false)}
-                          className="cursor-crosshair bg-white"
-                        />
+                      <canvas
+                        ref={canvasRef}
+                        onMouseDown={handleMouseDown}
+                        onMouseMove={handleMouseMove}
+                        onMouseUp={handleMouseUp}
+                        onMouseLeave={() => setDrawing(false)}
+                        className="cursor-crosshair bg-white"
+                      />
                     </div>
 
-                    <p className="text-xs text-gray-500 text-center">
-                      💡 Click and drag to select regions of interest on the scan
-                    </p>
+                        <p className="text-xs text-gray-500 text-center">
+                          💡 Click and drag to select regions of interest on the scan
+                        </p>
+                      </>
+                    )}
                   </div>
                 )}
 
-                {/* Step 2: Overall Report */}
                 {step === 2 && (
                   <div>
                     <div className="mb-4">
                       <h2 className="text-xl font-bold text-gray-900 mb-2">📄 Comprehensive Medical Report</h2>
                       <p className="text-sm text-gray-600">Complete analysis combining all medical data</p>
                     </div>
+
                     <textarea
-                      value={overallReport}
+                      value={streamingAnalysis || overallReport}
                       onChange={(e) => setOverallReport(e.target.value)}
                       className="w-full h-96 p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-vibrant-blue font-mono text-sm bg-green-50"
                       placeholder="Overall report will be generated automatically..."
                     />
-                    {analysisLoading && <div className="text-sm text-gray-600 mt-2">Analyzing images... please wait.</div>}
+                    
                     <div className="mt-4 grid grid-cols-3 gap-4">
                       <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg text-center">
                         <div className="text-2xl font-bold text-vibrant-blue">{getTotalRegions()}</div>
@@ -703,22 +804,24 @@ function Reports() {
                 <button
                   className="px-4 py-2 rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition"
                   onClick={() => setStep((s) => Math.max(0, s - 1))}
-                  disabled={step === 0}
+                  disabled={step === 0 || isPathologyLoading}
                 >
                   ← Back
                 </button>
                 <div className="flex gap-3">
                   {step < 2 ? (
                     <button
-                      className="px-4 py-2 rounded-lg text-white bg-gradient-to-r from-vibrant-blue to-teal-500 hover:brightness-105 transition shadow"
+                      className="px-4 py-2 rounded-lg text-white bg-gradient-to-r from-vibrant-blue to-teal-500 hover:brightness-105 transition shadow disabled:opacity-50 disabled:cursor-not-allowed"
                       onClick={() => setStep((s) => s + 1)}
+                      disabled={isPathologyLoading}
                     >
-                      Next →
+                      {isPathologyLoading ? "Processing..." : "Next →"}
                     </button>
                   ) : (
                     <button
-                      className="px-6 py-2 rounded-lg text-white bg-gradient-to-r from-green-500 to-teal-500 hover:brightness-105 transition shadow-lg font-semibold"
+                      className="px-6 py-2 rounded-lg text-white bg-gradient-to-r from-green-500 to-teal-500 hover:brightness-105 transition shadow-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
                       onClick={saveAnalysisToDb}
+                      disabled={analysisLoading}
                     >
                       ✓ Confirm & Submit Report
                     </button>
@@ -733,4 +836,4 @@ function Reports() {
   );
 }
 
-export default Reports;
+export default ReportAGUI;

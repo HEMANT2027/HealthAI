@@ -120,8 +120,8 @@ class MongoDBConnection:
                     "properties": {
                         "pseudonym_id": {
                             "bsonType": "string",
-                            "pattern": "^P-[A-Z0-9]{4}-[A-Z0-9]{4}$",
-                            "description": "Must be pseudonym format P-XXXX-XXXX"
+                            "pattern": "^[PDA]-[A-Z0-9]{4}-[A-Z0-9]{4}$",
+                            "description": "Must be pseudonym format [P|D|A]-XXXX-XXXX (P=Patient, D=Doctor, A=Admin)"
                         },
                         "visits": {
                             "bsonType": "array",

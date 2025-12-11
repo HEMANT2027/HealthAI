@@ -68,10 +68,10 @@ function Home() {
                   Get Started
                 </Link>
                 <Link
-                  to="/intake"
+                  to="/form"
                   className="inline-flex items-center justify-center px-6 py-3 rounded-lg font-semibold text-vibrant-blue border border-vibrant-blue hover:bg-vibrant-blue/10 transition transform hover:scale-[1.02]"
                 >
-                  Fill Medical Form
+                  Create Patient
                 </Link>
               </div>
             </div>

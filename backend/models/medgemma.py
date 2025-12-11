@@ -51,12 +51,12 @@ class MedGemmaMultiInputClient:
 
 
 if __name__ == "__main__":
-    client = MedGemmaMultiInputClient(endpoint_name="jumpstart-dft-hf-vlm-gemma-3-27b-in-20251028-060633")
+    client = MedGemmaMultiInputClient(endpoint_name="jumpstart-dft-hf-vlm-gemma-3-4b-ins-20251114-123227")
 
     prescription_text = "Tab Paracetamol 500mg twice daily for 5 days"
     pathology_text = "Histology shows dense lymphocytic infiltration with atypical nuclei"
     doctor_prompt = "Summarize findings and suggest possible diagnosis in a well descriptive manner and after that summarize all cases in bullet points, be considerate about every possible case"
-    image_paths = ["3.jpg"]
+    image_paths = ["processed_prescription.png"]
 
     payload = client.build_payload(
         system_prompt="You are a helpful medical assistant",

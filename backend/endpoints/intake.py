@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field, validator
 from datetime import datetime
 from typing import List, Optional
 import os
+import secrets
 from dotenv import load_dotenv
 from .Mongo_connect import get_mongo_connection
 from urllib.parse import urlsplit, urlunsplit
@@ -33,24 +34,11 @@ class DocumentInfo(BaseModel):
     type: Optional[str] = None  # File type: prescription, pathology, scan
 
 class IntakeFormCreate(BaseModel):
-    pseudonym_id: str = Field(...)
+    pseudonym_id: Optional[str] = None  # Optional - will be auto-generated for doctor-created patients
     fullName: str = Field(..., min_length=2, max_length=100)
     age: int = Field(..., ge=1, le=120)
-    phone: str = Field(..., min_length=10, max_length=20)
-    country: str = Field(..., min_length=2, max_length=100)
-    budget: float = Field(..., ge=0)
-    hasSightseeing: str = Field(..., pattern="^(yes|no)$")
-    sightseeingDays: Optional[int] = Field(None, ge=1, le=30)
-    sightseeingPrefs: List[str] = []
-    notes: Optional[str] = None
     documents: List[DocumentInfo] = []
     
-    @validator('sightseeingDays')
-    def validate_sightseeing_days(cls, v, values):
-        if values.get('hasSightseeing') == 'yes' and v is None:
-            raise ValueError('Sightseeing days required when sightseeing is enabled')
-        return v
-
 # ---------- Helper Functions ----------
 
 def format_intake_form(form: dict) -> dict:
@@ -63,14 +51,14 @@ def format_intake_form(form: dict) -> dict:
     if "updatedAt" in form and isinstance(form["updatedAt"], datetime):
         form["updatedAt"] = form["updatedAt"].isoformat() + "Z"
     
-    # Format documents to include url, fileName, uploadedAt, and type
+    # Format documents to include url, fileName, uploadedAt, type, and s3 metadata
     if "documents" in form:
         form["documents"] = [
             {
                 "url": doc.get("url", ""),
                 "fileName": doc.get("fileName", ""),
                 "uploadedAt": doc.get("uploadedAt", ""),
-                "type": doc.get("type", "clinical_notes")
+                "type": doc.get("type", "clinical_notes"),
             }
             for doc in form["documents"]
         ]
@@ -88,6 +76,13 @@ def sanitize_s3_url(url: str) -> str:
     except Exception:
         return url
 
+# ---------- Pseudonym ID Generator ----------
+def generate_patient_pseudonym_id() -> str:
+    """Generate a unique patient pseudonym ID in format P-XXXX-XXXX"""
+    part1 = secrets.token_hex(2).upper()  # 4 hex characters
+    part2 = secrets.token_hex(2).upper()  # 4 hex characters
+    return f"P-{part1}-{part2}"
+
 # ---------- INTAKE FORM ENDPOINTS ----------
 
 @router.post("/submit", status_code=status.HTTP_201_CREATED)
@@ -97,59 +92,81 @@ async def submit_intake_form(
 ):
     """
     Submit patient intake form
-    - Stores data in MongoDB in sample.json format
-    - Associates with logged-in patient
-    - Creates patient record in patients collection matching Mongo_connect.py structure
+    - If submitted by a doctor/admin: Creates new patient with auto-generated pseudonym ID
+    - If submitted by a patient: Uses their existing pseudonym ID
+    - Stores data in MongoDB and creates patient record in patients collection
     - Documents already uploaded to S3 via /upload endpoint
     """
     try:
-        # Verify pseudonym_id matches authenticated user
-        if form_data.pseudonym_id != current_user.get("pseudonym_id"):
+        user_role = current_user.get("role")
+        patient_pseudonym_id = None
+        assigned_doctor = None
+        
+        # Determine patient pseudonym ID based on who is submitting
+        if user_role in ["doctor", "admin"]:
+            patient_pseudonym_id = generate_patient_pseudonym_id()
+            print(f"✅ Generated new patient pseudonym ID: {patient_pseudonym_id}")
+            
+            # Assign the doctor to this patient using their email
+            assigned_doctor = current_user.get("email")
+            
+        elif user_role == "patient":
+            # Patient submitting their own form
+            if form_data.pseudonym_id and form_data.pseudonym_id != current_user.get("pseudonym_id"):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Pseudonym ID mismatch - patients can only submit their own forms"
+                )
+            patient_pseudonym_id = current_user.get("pseudonym_id")
+            assigned_doctor = ""  # No doctor assigned yet
+        else:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Pseudonym ID mismatch"
+                detail="Invalid user role"
             )
         
         # Check if patient already exists
-        existing_patient = patients_collection.find_one({"pseudonym_id": form_data.pseudonym_id})
+        existing_patient = patients_collection.find_one({"pseudonym_id": patient_pseudonym_id})
         
         if not existing_patient:
-            # Create patient record matching Mongo_connect.py structure with all fields initialized
+            # Create patient record matching Mongo_connect.py structure
             patient_doc = {
-                "pseudonym_id": form_data.pseudonym_id,
+                "pseudonym_id": patient_pseudonym_id,
                 "visits": [],
                 "patient_summary": "",
                 "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow(),
-                "source_system": "",
-                "assigned_doctor": ""
+                "source_system": "intake_form",
+                "assigned_doctor": assigned_doctor
             }
             patients_collection.insert_one(patient_doc)
-            print(f"✅ Created patient record for {form_data.pseudonym_id}")
+            print(f"✅ Created patient record for {patient_pseudonym_id} (assigned to: {assigned_doctor or 'none'})")
         else:
-            print(f"ℹ️ Patient record already exists for {form_data.pseudonym_id}")
+            # Update assigned doctor if doctor is creating the form
+            if assigned_doctor and not existing_patient.get("assigned_doctor"):
+                patients_collection.update_one(
+                    {"pseudonym_id": patient_pseudonym_id},
+                    {"$set": {"assigned_doctor": assigned_doctor, "updated_at": datetime.utcnow()}}
+                )
+                print(f"✅ Updated patient {patient_pseudonym_id} - assigned doctor: {assigned_doctor}")
+            else:
+                print(f"ℹ️ Patient record already exists for {patient_pseudonym_id}")
         
         # Create intake form document
         intake_doc = {
-            "patient": form_data.pseudonym_id,
+            "patient": patient_pseudonym_id,
             "fullName": form_data.fullName,
             "age": form_data.age,
-            "phone": form_data.phone,
-            "country": form_data.country,
-            "budget": form_data.budget,
-            "hasSightseeing": form_data.hasSightseeing,
-            "sightseeingDays": form_data.sightseeingDays if form_data.hasSightseeing == "yes" else None,
-            "sightseeingPrefs": form_data.sightseeingPrefs if form_data.hasSightseeing == "yes" else [],
-            "notes": form_data.notes,
             "documents": [
                 {
                     "url": sanitize_s3_url(doc.url or ""),
                     "fileName": doc.fileName,
                     "uploadedAt": doc.uploadedAt,
-                    "type": doc.type or "clinical_notes"
+                    "type": doc.type or "clinical_notes",
                 }
                 for doc in form_data.documents
             ],
+            "assignedDoctor": assigned_doctor,
             "createdAt": datetime.utcnow(),
             "updatedAt": datetime.utcnow()
         }
@@ -160,12 +177,14 @@ async def submit_intake_form(
         # Get the inserted document
         inserted_doc = intake_collection.find_one({"_id": result.inserted_id})
         
-        print(f"✅ Intake form submitted successfully for patient {form_data.pseudonym_id}: {result.inserted_id}")
+        print(f"✅ Intake form submitted successfully for patient {patient_pseudonym_id}: {result.inserted_id}")
         
         return {
             "success": True,
             "message": "Intake form submitted successfully",
             "formId": str(result.inserted_id),
+            "pseudonym_id": patient_pseudonym_id,  # Return the patient pseudonym ID
+            "assigned_doctor": assigned_doctor,
             "data": format_intake_form(inserted_doc)
         }
         
@@ -198,13 +217,7 @@ async def get_intake_forms(
     # Role-based filtering
     if current_user.get("role") == "patient":
         query["patient"] = current_user.get("pseudonym_id")
-    
-    # Additional filters
-    if status:
-        query["status"] = status
-    if country:
-        query["country"] = country
-    
+        
     try:
         forms = list(
             intake_collection

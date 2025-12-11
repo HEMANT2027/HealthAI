@@ -1,135 +1,112 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Body, Depends
+"""
+AGUI Protocol Implementation for Medical Report Processing
+Provides streaming responses for OCR and analysis tasks
+"""
+
+from fastapi import APIRouter, Request, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import Dict, Any, List
-from pymongo import MongoClient
-import datetime
+from typing import Optional, Dict, Any, List
+import json
+import uuid
+from datetime import datetime
 import asyncio
 import os
-import tempfile
-import requests
-from PIL import Image
+
 from endpoints.auth import authMiddleware
-from bson import ObjectId
+from pymongo import MongoClient
 
-# === Import your pipelines ===
-try:
-    from .ocr_ner import MedicalOCRPipeline
-    from .patho import PDFPathologyPipeline
-    from .medgemma import MedGemmaMultiInputClient
-except ImportError:
-    # Fallback for when modules are not available
-    MedicalOCRPipeline = None
-    PDFPathologyPipeline = None
+# Import pipelines
+from .ocr_ner import MedicalOCRPipeline
+from .patho import PDFPathologyPipeline
+from .medgemma import MedGemmaMultiInputClient
+# except ImportError:
+#     MedicalOCRPipeline = None
+#     PDFPathologyPipeline = None
+#     MedGemmaMultiInputClient = None
 
-router = APIRouter(prefix="/report", tags=["Medical Report Pipeline"])
-MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
-GCP_KEY_FILE = "heroic-dynamo-473510-q9-936d0b6e305a.json"
-GCP_KEY_PATH = os.path.join(MODULE_DIR, GCP_KEY_FILE)
+router = APIRouter(prefix="/report-agent", tags=["Report AGUI Agent"])
 
-# ==============================
 # MongoDB Setup
-# ==============================
 client = MongoClient(os.getenv("MONGODB_KEY"))
 db = client["medicotourism"]
-collection = db["ocr_medsam_reports"]
 form_collection = db["intake_forms"]
+collection = db["ocr_medsam_reports"]
 
-# ==============================
-# Data Models
-# ==============================
-class OCRExtractRequest(BaseModel):
-    image_path: str
-
-class PDFPathologyExtractRequest(BaseModel) :
-    pdf_path : str
-
-class MedGemmaRequest(BaseModel):
-    pathology_text: str
-    prescription_text: str
-    medsam_text: str
-    image_data: List[str] = []
-    doctor_prompt: str = "Summarize findings and suggest possible diagnosis in a well descriptive manner and after that summarize all cases in bullet points, be considerate about every possible case"
+MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
+GCP_KEY_FILE = "heroic-dynamo-473510-q9-6d66f572235e.json"
+GCP_KEY_PATH = os.path.join(MODULE_DIR, GCP_KEY_FILE)
 
 
-# ==============================
-# 0️⃣ Fetch Intake Form Data
-# ==============================
-@router.get("/intake-form/{pseudonym_id}")
-async def get_intake_form_data(
-    pseudonym_id: str,
-    current_user: dict = Depends(authMiddleware)
-):
-    """
-    Fetch intake form data for a patient and process documents concurrently
-    (prescription + pathology OCR in parallel)
-    """
-    try:
-        # Fetch the intake form
-        intake_form = form_collection.find_one({"patient": pseudonym_id})
-        if not intake_form:
-            raise HTTPException(status_code=404, detail="Intake form not found")
-
-        documents = intake_form.get("documents", [])
-        prescription_file = next((doc for doc in documents if doc.get("type") == "prescription"), None)
-        pathology_file = next((doc for doc in documents if doc.get("type") == "pathology"), None)
-        scan_files = [doc for doc in documents if doc.get("type") == "scan"]
-
-        async def process_prescription():
-            if not prescription_file or not MedicalOCRPipeline:
-                return None
-            try:
-                return await asyncio.to_thread(
-                    lambda: _run_medical_ocr(prescription_file.get("url"))
-                )
-            except Exception as e:
-                print(f"Error processing prescription OCR: {e}")
-                return "Error processing prescription file"
-
-        async def process_pathology():
-            if not pathology_file or not PDFPathologyPipeline:
-                return None
-            try:
-                return await asyncio.to_thread(
-                    lambda: _run_pathology_ocr(pathology_file.get("url"))
-                )
-            except Exception as e:
-                print(f"Error processing pathology OCR: {e}")
-                return "Error processing pathology file"
-
-        # Run both OCRs in parallel
-        prescription_ocr, pathology_ocr = await asyncio.gather(
-            process_prescription(),
-            process_pathology()
-        )
-
-        return {
-            "success": True,
-            "prescription_ocr": prescription_ocr,
-            "pathology_ocr": pathology_ocr,
-            "scan_images": [
-                {"url": doc.get("url"), "name": doc.get("fileName")}
-                for doc in scan_files
-            ],
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+# ============================================================
+# AGUI Event Types
+# ============================================================
+class EventType:
+    RUN_STARTED = "run_started"
+    PRESCRIPTION_STARTED = "prescription_started"
+    PRESCRIPTION_CHUNK = "prescription_chunk"
+    PRESCRIPTION_FINISHED = "prescription_finished"
+    PATHOLOGY_STARTED = "pathology_started"
+    PATHOLOGY_CHUNK = "pathology_chunk"
+    PATHOLOGY_FINISHED = "pathology_finished"
+    SCANS_LOADED = "scans_loaded"
+    RUN_FINISHED = "run_finished"
+    ERROR = "error"
 
 
-# Helper functions for threaded execution
-def _run_medical_ocr(image_url: str):
+# ============================================================
+# Request Models
+# ============================================================
+class ProcessIntakeRequest(BaseModel):
+    """Input schema for processing intake form"""
+    pseudonym_id: str
+
+
+# ============================================================
+# Event Encoder
+# ============================================================
+class EventEncoder:
+    """Encodes events for streaming based on Accept header"""
+    
+    def __init__(self, accept: Optional[str] = None):
+        self.use_sse = accept and "text/event-stream" in accept
+        self.content_type = "text/event-stream" if self.use_sse else "application/x-ndjson"
+    
+    def encode(self, event: Dict[str, Any]) -> str:
+        """Encode event as SSE or JSON-lines"""
+        json_str = json.dumps(event, ensure_ascii=False)
+        
+        if self.use_sse:
+            return f"data: {json_str}\n\n"
+        else:
+            return f"{json_str}\n"
+    
+    def get_content_type(self) -> str:
+        return self.content_type
+
+
+# ============================================================
+# Helper Functions
+# ============================================================
+def _run_medical_ocr(image_url: str) -> tuple:
+    """Run prescription OCR pipeline and return (text, extracted_medicines, suggested_medicines)"""
+    if not MedicalOCRPipeline:
+        raise Exception("OCR pipeline not available")
+    
     pipeline = MedicalOCRPipeline(
         image_path=image_url,
         gcp_key_path=GCP_KEY_PATH,
         gemini_api_key=os.getenv("GEMINI_API_KEY")
     )
     pipeline.run()
-    return pipeline.full_text
+    return pipeline.full_text, pipeline.medicines, pipeline.suggested_medicines
 
 
-def _run_pathology_ocr(pdf_url: str):
+def _run_pathology_ocr(pdf_url: str) -> str:
+    """Run pathology OCR pipeline"""
+    if not PDFPathologyPipeline:
+        raise Exception("Pathology pipeline not available")
+    
     pipeline = PDFPathologyPipeline(
         pdf_path=pdf_url,
         gcp_key_path=GCP_KEY_PATH,
@@ -138,190 +115,502 @@ def _run_pathology_ocr(pdf_url: str):
     pipeline.run()
     return pipeline.ocr_text
 
-# ==============================
-# 1️⃣ Run OCR + Gemini Pipeline
-# ==============================
-@router.post("/ocr/extract")
-async def extract_ocr_data(request: OCRExtractRequest):
+
+# ============================================================
+# AGUI Streaming Endpoint
+# ============================================================
+@router.post("")
+async def process_intake_streaming(
+    input_data: ProcessIntakeRequest,
+    request: Request,
+    current_user: dict = Depends(authMiddleware)
+):
     """
-    Extract structured text data using Vision API + Gemini.
-    """
-    try:
-        if not MedicalOCRPipeline:
-            raise HTTPException(status_code=503, detail="OCR pipeline not available")
-            
-        pipeline = MedicalOCRPipeline(
-            image_path=request.image_path,
-            gcp_key_path = "heroic-dynamo-473510-q9-936d0b6e305a.json",  # Replace with your actual key file
-            gemini_api_key=os.getenv("GEMINI_API_KEY")
-        )
-        pipeline.run()
-
-        return {
-            "status": "success",
-            "ocr_full_text": pipeline.full_text,
-            "medical_entities": pipeline.extract_medical_entities()
-        }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/pdf_pathology/extract")
-async def extract_pdf_pathology_data(request: PDFPathologyExtractRequest):
-    """
-    Extract pathology report from PDF using PDF Pathology pipeline model.
-    """
-    try:
-        if not PDFPathologyPipeline:
-            raise HTTPException(status_code=503, detail="Pathology pipeline not available")
-            
-        pipeline = PDFPathologyPipeline(
-            pdf_path=request.pdf_path,
-            gcp_key_path = "heroic-dynamo-473510-q9-936d0b6e305a.json" , # Replace with your actual key file
-            gemini_api_key=os.getenv("GEMINI_API_KEY")
-        )
-        pipeline.run()
-
-        return {
-            "status": "success",
-            "ocr_full_text": pipeline.ocr_text,
-            "medical_entities": pipeline.entities
-        }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    AGUI-compatible streaming endpoint for processing intake forms.
     
-
-@router.post("/analyze_medgemma")
-async def analyze_with_medgemma(payload: dict = Body(...)):
+    Streams events:
+    - run_started: Processing begins
+    - prescription_started: Prescription OCR begins
+    - prescription_chunk: Streaming prescription text
+    - prescription_finished: Prescription OCR complete
+    - pathology_started: Pathology OCR begins
+    - pathology_chunk: Streaming pathology text
+    - pathology_finished: Pathology OCR complete
+    - scans_loaded: Scan images loaded
+    - run_finished: Processing complete
     """
-    Payload format:
-    {
-      "images": [
-        { "url": "https://...", "regions": [{ "x": 10, "y": 20, "w": 100, "h": 80 }, ...] },
-        ...
-      ],
-      "prescription_text": "...",
-      "pathology_text": "...",
-      "doctor_prompt": "optional prompt"
-    }
-    """
-    images = payload.get("images", [])
-    prescription_text = payload.get("prescription_text", "")
-    pathology_text = payload.get("pathology_text", "")
-    doctor_prompt = payload.get("doctor_prompt")
-
-    if not images:
-        raise HTTPException(status_code=400, detail="No images provided")
-
-    endpoint_name = os.getenv("MEDGEMMA_ENDPOINT") or "jumpstart-dft-hf-vlm-gemma-3-4b-ins-20251031-123610"
-    client = MedGemmaMultiInputClient(endpoint_name=endpoint_name)
-
-    temp_files = []
-    try:
-        # For each image, download and crop selected regions (if any).
-        # Cropped images are passed to MedGemma.
-        image_paths_for_model = []
-
-        for img_obj in images:
-            url = img_obj.get("url")
-            regions = img_obj.get("regions", []) or []
-
-            if not url:
-                continue
-
-            # download remote image
-            try:
-                r = requests.get(url, timeout=30)
-                r.raise_for_status()
-            except Exception as e:
-                raise HTTPException(status_code=400, detail=f"Failed to download image {url}: {e}")
-
-            # save original to temp
-            tmp_orig = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
-            tmp_orig.write(r.content)
-            tmp_orig.flush()
-            tmp_orig.close()
-            temp_files.append(tmp_orig.name)
-
-            # open image for cropping
-            try:
-                pil_img = Image.open(tmp_orig.name).convert("RGB")
-            except Exception as e:
-                # fallback: pass original file if PIL cannot open
-                image_paths_for_model.append(tmp_orig.name)
-                continue
-
-            if regions:
-                for i, reg in enumerate(regions):
+    
+    encoder = EventEncoder(accept=request.headers.get("accept"))
+    run_id = str(uuid.uuid4())
+    
+    async def event_generator():
+        try:
+            # ✅ Event 1: Run Started
+            yield encoder.encode({
+                "type": EventType.RUN_STARTED,
+                "runId": run_id,
+                "timestamp": datetime.utcnow().isoformat()
+            })
+            
+            # Fetch intake form
+            intake_form = await asyncio.to_thread(
+                form_collection.find_one,
+                {"patient": input_data.pseudonym_id}
+            )
+            
+            if not intake_form:
+                yield encoder.encode({
+                    "type": EventType.ERROR,
+                    "error": "Intake form not found",
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+                return
+            
+            documents = intake_form.get("documents", [])
+            prescription_files = [doc for doc in documents if doc.get("type") == "prescription"]
+            pathology_files = [doc for doc in documents if doc.get("type") == "pathology"]
+            scan_files = [doc for doc in documents if doc.get("type") == "scan"]
+            
+            prescription_text = ""
+            pathology_text = ""
+            prescription_results = []
+            pathology_results = []
+            all_extracted_medicines = []  # Collect extracted medicines from prescriptions
+            all_suggested_medicines = []  # Collect suggested medicines
+            
+            # ✅ Process Multiple Prescription OCRs (First, with streaming)
+            if prescription_files:
+                yield encoder.encode({
+                    "type": EventType.PRESCRIPTION_STARTED,
+                    "total_files": len(prescription_files),
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+                
+                for idx, prescription_file in enumerate(prescription_files, 1):
                     try:
-                        x = int(reg.get("x", 0))
-                        y = int(reg.get("y", 0))
-                        w = int(reg.get("w", 0))
-                        h = int(reg.get("h", 0))
-                        # ensure bounds
-                        left = max(0, x)
-                        top = max(0, y)
-                        right = min(pil_img.width, x + w)
-                        bottom = min(pil_img.height, y + h)
-                        if right <= left or bottom <= top:
+                        yield encoder.encode({
+                            "type": EventType.PRESCRIPTION_CHUNK,
+                            "delta": f"\n\n=== Processing Prescription {idx}/{len(prescription_files)}: {prescription_file.get('fileName', 'Unknown')} ===\n\n"
+                        })
+                        
+                        # Run OCR in thread - now returns (text, extracted_medicines, suggested_medicines)
+                        file_text, extracted_meds, suggested_meds = await asyncio.to_thread(
+                            _run_medical_ocr,
+                            prescription_file.get("url")
+                        )
+                        
+                        # Collect medicines
+                        all_extracted_medicines.extend(extracted_meds)
+                        all_suggested_medicines.extend(suggested_meds)
+                        
+                        prescription_results.append({
+                            "file_name": prescription_file.get("fileName", "Unknown"),
+                            "file_url": prescription_file.get("url"),
+                            "text": file_text,
+                            "extracted_medicines": extracted_meds,
+                            "suggested_medicines": suggested_meds
+                        })
+                        
+                        # Stream the result in chunks
+                        chunk_size = 100
+                        for i in range(0, len(file_text), chunk_size):
+                            chunk = file_text[i:i + chunk_size]
+                            yield encoder.encode({
+                                "type": EventType.PRESCRIPTION_CHUNK,
+                                "delta": chunk
+                            })
+                            await asyncio.sleep(0.03)
+                        
+                    except Exception as e:
+                        error_msg = f"Error processing prescription {idx}: {str(e)}"
+                        prescription_results.append({
+                            "file_name": prescription_file.get("fileName", "Unknown"),
+                            "file_url": prescription_file.get("url"),
+                            "text": error_msg,
+                            "error": True
+                        })
+                        yield encoder.encode({
+                            "type": EventType.PRESCRIPTION_CHUNK,
+                            "delta": f"\n\n❌ {error_msg}\n\n"
+                        })
+                
+                # Combine all prescription texts
+                prescription_text = "\n\n".join([
+                    f"=== {r['file_name']} ===\n{r['text']}" 
+                    for r in prescription_results
+                ])
+                
+                # Remove duplicates from medicines lists
+                unique_extracted = list(dict.fromkeys(all_extracted_medicines))
+                unique_suggested = list(dict.fromkeys(all_suggested_medicines))
+                
+                yield encoder.encode({
+                    "type": EventType.PRESCRIPTION_FINISHED,
+                    "content": prescription_text,
+                    "files_processed": len(prescription_files),
+                    "results": prescription_results,
+                    "extracted_medicines": unique_extracted,
+                    "suggested_medicines": unique_suggested,
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+            
+            # ✅ Process Multiple Pathology OCRs (Second, with streaming)
+            if pathology_files:
+                yield encoder.encode({
+                    "type": EventType.PATHOLOGY_STARTED,
+                    "total_files": len(pathology_files),
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+                
+                for idx, pathology_file in enumerate(pathology_files, 1):
+                    try:
+                        yield encoder.encode({
+                            "type": EventType.PATHOLOGY_CHUNK,
+                            "delta": f"\n\n=== Processing Pathology Report {idx}/{len(pathology_files)}: {pathology_file.get('fileName', 'Unknown')} ===\n\n"
+                        })
+                        
+                        # Run OCR in thread
+                        file_text = await asyncio.to_thread(
+                            _run_pathology_ocr,
+                            pathology_file.get("url")
+                        )
+                        
+                        pathology_results.append({
+                            "file_name": pathology_file.get("fileName", "Unknown"),
+                            "file_url": pathology_file.get("url"),
+                            "text": file_text
+                        })
+                        
+                        # Stream the result in chunks
+                        chunk_size = 100
+                        for i in range(0, len(file_text), chunk_size):
+                            chunk = file_text[i:i + chunk_size]
+                            yield encoder.encode({
+                                "type": EventType.PATHOLOGY_CHUNK,
+                                "delta": chunk
+                            })
+                            await asyncio.sleep(0.03)
+                        
+                    except Exception as e:
+                        error_msg = f"Error processing pathology report {idx}: {str(e)}"
+                        pathology_results.append({
+                            "file_name": pathology_file.get("fileName", "Unknown"),
+                            "file_url": pathology_file.get("url"),
+                            "text": error_msg,
+                            "error": True
+                        })
+                        yield encoder.encode({
+                            "type": EventType.PATHOLOGY_CHUNK,
+                            "delta": f"\n\n❌ {error_msg}\n\n"
+                        })
+                
+                # Combine all pathology texts
+                pathology_text = "\n\n".join([
+                    f"=== {r['file_name']} ===\n{r['text']}" 
+                    for r in pathology_results
+                ])
+                
+                yield encoder.encode({
+                    "type": EventType.PATHOLOGY_FINISHED,
+                    "content": pathology_text,
+                    "files_processed": len(pathology_files),
+                    "results": pathology_results,
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+            
+            # ✅ Load Scan Images
+            scan_images = [
+                {"url": doc.get("url"), "name": doc.get("fileName")}
+                for doc in scan_files
+            ]
+            
+            yield encoder.encode({
+                "type": EventType.SCANS_LOADED,
+                "scans": scan_images,
+                "count": len(scan_images),
+                "timestamp": datetime.utcnow().isoformat()
+            })
+            
+            # ✅ Event: Run Finished
+            # Remove duplicates from final medicines lists
+            unique_extracted = list(dict.fromkeys(all_extracted_medicines))
+            unique_suggested = list(dict.fromkeys(all_suggested_medicines))
+            
+            yield encoder.encode({
+                "type": EventType.RUN_FINISHED,
+                "runId": run_id,
+                "prescription_text": prescription_text,
+                "pathology_text": pathology_text,
+                "prescription_results": prescription_results,
+                "pathology_results": pathology_results,
+                "scan_images": scan_images,
+                "extracted_medicines": unique_extracted,
+                "suggested_medicines": unique_suggested,
+                "total_prescriptions": len(prescription_files),
+                "total_pathology_reports": len(pathology_files),
+                "total_scans": len(scan_images),
+                "total_extracted_medicines": len(unique_extracted),
+                "total_suggested_medicines": len(unique_suggested),
+                "timestamp": datetime.utcnow().isoformat()
+            })
+            
+        except Exception as e:
+            yield encoder.encode({
+                "type": EventType.ERROR,
+                "error": str(e),
+                "timestamp": datetime.utcnow().isoformat()
+            })
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type=encoder.get_content_type(),
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
+
+# ============================================================
+# MedGemma Analysis Endpoint (AGUI Streaming)
+# ============================================================
+class AnalyzeMedGemmaRequest(BaseModel):
+    """Input schema for MedGemma analysis"""
+    images: List[Dict[str, Any]]
+    prescription_text: str = ""
+    pathology_text: str = ""
+    doctor_prompt: Optional[str] = None
+
+
+@router.post("/analyze-medgemma")
+async def analyze_with_medgemma_streaming(
+    payload: AnalyzeMedGemmaRequest,
+    request: Request,
+    current_user: dict = Depends(authMiddleware)
+):
+    """
+    AGUI-compatible streaming endpoint for MedGemma analysis.
+    
+    Streams events:
+    - analysis_started: Analysis begins
+    - analysis_progress: Progress updates
+    - analysis_chunk: Streaming analysis text
+    - analysis_finished: Analysis complete
+    """
+    import tempfile
+    import requests
+    from PIL import Image
+    
+    encoder = EventEncoder(accept=request.headers.get("accept"))
+    analysis_id = str(uuid.uuid4())
+    
+    async def event_generator():
+        temp_files = []
+        try:
+            # ✅ Event 1: Analysis Started
+            yield encoder.encode({
+                "type": "analysis_started",
+                "analysisId": analysis_id,
+                "timestamp": datetime.utcnow().isoformat()
+            })
+            
+            images = payload.images
+            prescription_text = payload.prescription_text
+            pathology_text = payload.pathology_text
+            doctor_prompt = """
+            Please analyze the selected regions and summarize clinical findings.
+
+            Explainability Requirements:
+            1. Highlight the key features, regions, or textual cues that influenced your conclusions.
+            2. Provide confidence scores for each major finding.
+            3. Present two levels of explanation:
+                - Clinician-level: detailed medical reasoning suitable for professional review.
+                - Patient-level: simplified explanation in plain language for patient understanding.
+            4. Generate an audit log entry:
+                - Include reasoning steps, confidence values, and identified features for traceability.
+            """ 
+            if not images:
+                yield encoder.encode({
+                    "type": "error",
+                    "error": "No images provided",
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+                return
+
+            if not MedGemmaMultiInputClient:
+                yield encoder.encode({
+                    "type": "error",
+                    "error": "MedGemma client not available",
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+                return
+
+            # ✅ Event 2: Progress - Downloading images
+            yield encoder.encode({
+                "type": "analysis_progress",
+                "message": "Downloading and processing images...",
+                "progress": 20,
+                "timestamp": datetime.utcnow().isoformat()
+            })
+
+            endpoint_name = os.getenv("MEDGEMMA_ENDPOINT") or "jumpstart-dft-hf-vlm-gemma-3-4b-ins-20251211-073030"
+            client = MedGemmaMultiInputClient(endpoint_name=endpoint_name)
+
+            image_paths_for_model = []
+
+            for img_obj in images:
+                url = img_obj.get("url")
+                regions = img_obj.get("regions", []) or []
+
+                if not url:
+                    continue
+
+                # Download remote image
+                try:
+                    r = await asyncio.to_thread(requests.get, url, timeout=30)
+                    r.raise_for_status()
+                except Exception as e:
+                    yield encoder.encode({
+                        "type": "error",
+                        "error": f"Failed to download image {url}: {e}",
+                        "timestamp": datetime.utcnow().isoformat()
+                    })
+                    return
+
+                # Save original to temp
+                tmp_orig = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
+                tmp_orig.write(r.content)
+                tmp_orig.flush()
+                tmp_orig.close()
+                temp_files.append(tmp_orig.name)
+
+                # Open image for cropping
+                try:
+                    pil_img = Image.open(tmp_orig.name).convert("RGB")
+                except Exception as e:
+                    image_paths_for_model.append(tmp_orig.name)
+                    continue
+
+                if regions:
+                    for i, reg in enumerate(regions):
+                        try:
+                            x = int(reg.get("x", 0))
+                            y = int(reg.get("y", 0))
+                            w = int(reg.get("w", 0))
+                            h = int(reg.get("h", 0))
+                            left = max(0, x)
+                            top = max(0, y)
+                            right = min(pil_img.width, x + w)
+                            bottom = min(pil_img.height, y + h)
+                            if right <= left or bottom <= top:
+                                continue
+                            cropped = pil_img.crop((left, top, right, bottom))
+                            out_path = tmp_orig.name + f"_crop_{i}.jpg"
+                            cropped.save(out_path, format="JPEG", quality=90)
+                            temp_files.append(out_path)
+                            image_paths_for_model.append(out_path)
+                        except Exception:
                             continue
-                        cropped = pil_img.crop((left, top, right, bottom))
-                        out_path = tmp_orig.name + f"_crop_{i}.jpg"
-                        cropped.save(out_path, format="JPEG", quality=90)
-                        temp_files.append(out_path)
-                        image_paths_for_model.append(out_path)
-                    except Exception:
-                        # on failure of a region, skip it
-                        continue
-            else:
-                # no regions — send full image
-                image_paths_for_model.append(tmp_orig.name)
+                else:
+                    image_paths_for_model.append(tmp_orig.name)
 
-        if not image_paths_for_model:
-            raise HTTPException(status_code=400, detail="No valid image pages/regions available to analyze")
+            if not image_paths_for_model:
+                yield encoder.encode({
+                    "type": "error",
+                    "error": "No valid image pages/regions available to analyze",
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+                return
 
-        # build payload and invoke MedGemma
-        payload_for_model = client.build_payload(
-            system_prompt="You are a helpful medical assistant",
-            doctor_prompt=doctor_prompt,
-            prescription_text=prescription_text,
-            pathology_text=pathology_text,
-            image_paths=image_paths_for_model,
-            max_tokens=1024
-        )
+            # ✅ Event 3: Progress - Building payload
+            yield encoder.encode({
+                "type": "analysis_progress",
+                "message": "Preparing analysis request...",
+                "progress": 40,
+                "timestamp": datetime.utcnow().isoformat()
+            })
 
-        model_result = client.invoke(payload_for_model)
-        return {"success": True, "analysis": model_result}
+            # Build payload and invoke MedGemma
+            payload_for_model = client.build_payload(
+                system_prompt="You are a helpful medical assistant",
+                doctor_prompt=doctor_prompt,
+                prescription_text=prescription_text,
+                pathology_text=pathology_text,
+                image_paths=image_paths_for_model,
+                max_tokens=1024
+            )
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        # cleanup temp files
-        for p in temp_files:
-            try:
-                os.remove(p)
-            except Exception:
-                pass
+            # ✅ Event 4: Progress - Analyzing
+            yield encoder.encode({
+                "type": "analysis_progress",
+                "message": "Running MedGemma analysis...",
+                "progress": 60,
+                "timestamp": datetime.utcnow().isoformat()
+            })
 
+            # Run analysis in thread
+            model_result = await asyncio.to_thread(client.invoke, payload_for_model)
+
+            # ✅ Event 5: Stream result in chunks
+            yield encoder.encode({
+                "type": "analysis_progress",
+                "message": "Generating report...",
+                "progress": 80,
+                "timestamp": datetime.utcnow().isoformat()
+            })
+
+            chunk_size = 50
+            for i in range(0, len(model_result), chunk_size):
+                chunk = model_result[i:i + chunk_size]
+                yield encoder.encode({
+                    "type": "analysis_chunk",
+                    "delta": chunk
+                })
+                await asyncio.sleep(0.05)
+
+            # ✅ Event 6: Analysis Finished
+            yield encoder.encode({
+                "type": "analysis_finished",
+                "analysisId": analysis_id,
+                "content": model_result,
+                "timestamp": datetime.utcnow().isoformat()
+            })
+
+        except Exception as e:
+            yield encoder.encode({
+                "type": "error",
+                "error": str(e),
+                "timestamp": datetime.utcnow().isoformat()
+            })
+        finally:
+            # Cleanup temp files
+            for p in temp_files:
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type=encoder.get_content_type(),
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
+
+# ============================================================
+# Save Analysis Endpoint
+# ============================================================
 @router.post("/save-analysis")
 async def save_analysis(
-    payload: Dict[str, Any] = Body(...),
+    payload: Dict[str, Any],
     current_user: dict = Depends(authMiddleware)
 ):
     """
     Save combined OCR / pathology / MedGemma results to MongoDB.
-
-    Expected payload keys (flexible):
-      - pseudonym_id (required)
-      - prescription_ocr
-      - pathology_ocr
-      - medgemma_analysis  (can be string or structured JSON)
-      - images (list of {url, name, regions[...]})
-      - meta (optional dict)
+    Same functionality as /report/save-analysis
     """
     try:
         pseudonym_id = payload.get("pseudonym_id")
@@ -333,17 +622,21 @@ async def save_analysis(
             "prescription_ocr": payload.get("prescription_ocr", ""),
             "pathology_ocr": payload.get("pathology_ocr", ""),
             "medgemma_analysis": payload.get("medgemma_analysis") or payload.get("analysis") or "",
+            "extracted_medicines": payload.get("extracted_medicines", []),  # Medicines from prescription
+            "suggested_medicines": payload.get("suggested_medicines", []),  # AI-suggested medicines
+            "suspected": payload.get("suspected", []),  # Suspected conditions
+            "symptoms": payload.get("symptoms", []),    # Symptoms
             "images": payload.get("images", []),
             "meta": payload.get("meta", {}),
             "created_by": current_user.get("email") if current_user else None,
-            "created_at": datetime.datetime.utcnow()
+            "created_at": datetime.utcnow()
         }
 
         # Insert record
         res = collection.insert_one(record)
         inserted_id = str(res.inserted_id)
 
-        # Optionally link this report to the intake form document if it exists
+        # Link to intake form
         try:
             form_collection.update_one(
                 {"patient": pseudonym_id},
@@ -351,7 +644,6 @@ async def save_analysis(
                 upsert=False
             )
         except Exception:
-            # non-fatal; continue even if linking fails
             pass
 
         return {"success": True, "report_id": inserted_id}
@@ -360,3 +652,22 @@ async def save_analysis(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================
+# Health Check
+# ============================================================
+@router.get("/health")
+async def report_agent_health():
+    """Check if report agent is operational"""
+    return {
+        "status": "healthy",
+        "agent": "ReportProcessor",
+        "protocol": "AGUI",
+        "version": "1.0.0",
+        "pipelines": {
+            "ocr": MedicalOCRPipeline is not None,
+            "pathology": PDFPathologyPipeline is not None,
+            "medgemma": MedGemmaMultiInputClient is not None
+        }
+    }

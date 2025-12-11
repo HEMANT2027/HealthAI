@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from google.cloud import vision
 import google.generativeai as genai
 from fastapi import APIRouter, HTTPException, Body
-import fitz  
+import pymupdf as fitz  
 import shutil  # <-- added
 from PIL import Image  # <-- added
 
@@ -24,6 +24,7 @@ class MedicalOCRPipeline:
         self.processed_image_path = 'processed_prescription.png'
         self.full_text = None
         self.model = None
+        self.medicines = []  # Store extracted medicines
 
         # Minimal additions to support PDF input
         self.pdf_path = None
@@ -96,7 +97,7 @@ class MedicalOCRPipeline:
                 raise RuntimeError(f"❌ Could not download PDF from URL: {e}")
 
         try:
-            doc = fitz.open(pdf_path)
+            doc = fitz.Document(pdf_path)
         except Exception as e:
             raise RuntimeError(f"❌ Could not open PDF '{pdf_path}': {e}")
 
@@ -182,26 +183,40 @@ class MedicalOCRPipeline:
 
     def configure_gcp_credentials(self):
         print("🔐 Configuring GCP credentials...")
-        if not os.path.exists(self.gcp_key_path):
-            raise FileNotFoundError("❌ GCP key file not found.")
-        os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = self.gcp_key_path
-        print("✅ GCP credentials configured.")
+        # Convert to absolute path
+        abs_path = os.path.abspath(self.gcp_key_path)
+        if not os.path.exists(abs_path):
+            raise FileNotFoundError(f"❌ GCP key file not found at: {abs_path}")
+        os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = abs_path
+        print(f"✅ GCP credentials configured: {abs_path}")
 
     def extract_text_with_vision(self):
         print("📄 Extracting text with Vision API...")
-        client = vision.ImageAnnotatorClient()
-        with open(self.processed_image_path, 'rb') as image_file:
-            content = image_file.read()
-        image = vision.Image(content=content)
-        response = client.document_text_detection(image=image)
-        if response.error.message:
-            raise Exception(f"Vision API error: {response.error.message}")
-        self.full_text = response.full_text_annotation.text
-        ocr_text = response.full_text_annotation.text
-        print("\n✅ Text Extraction Complete!")
-        print("\n================ OCR OUTPUT ================")
-        print(self.full_text)
-        print("==========================================")
+        try:
+            # Explicitly load credentials from file
+            from google.oauth2 import service_account
+            credentials = service_account.Credentials.from_service_account_file(
+                os.path.abspath(self.gcp_key_path)
+            )
+            client = vision.ImageAnnotatorClient(credentials=credentials)
+            
+            with open(self.processed_image_path, 'rb') as image_file:
+                content = image_file.read()
+            image = vision.Image(content=content)
+            response = client.document_text_detection(image=image)
+            
+            if response.error.message:
+                raise Exception(f"Vision API error: {response.error.message}")
+            
+            self.full_text = response.full_text_annotation.text
+            ocr_text = response.full_text_annotation.text
+            print("\n✅ Text Extraction Complete!")
+            print("\n================ OCR OUTPUT ================")
+            print(self.full_text)
+            print("==========================================")
+        except Exception as e:
+            print(f"❌ Vision API Error: {e}")
+            raise
 
     def configure_gemini(self):
         print("🤖 Configuring Gemini API...")
@@ -213,10 +228,9 @@ class MedicalOCRPipeline:
         print("✅ Gemini API configured.")
 
     def extract_medical_entities(self):
-        print("🧠 Extracting medical entities...")
         if not self.full_text:
-            print("❌ No OCR text available for NER.")
-            return []
+            raise ValueError("❌ No OCR text to process for NER.")
+
         prompt = f"""
         You are a biomedical text mining expert.
         Extract all medically relevant entities (diseases, symptoms, drugs, tests, anatomy, etc.)
@@ -228,32 +242,55 @@ class MedicalOCRPipeline:
         {self.full_text}
         ---
         """
-        raw_text=""
         try:
             response = self.model.generate_content(prompt)
             raw_text = getattr(response, "text", "").strip()
             if not raw_text:
-                raise ValueError("Empty response from Gemini API")
+                raise ValueError("Empty response from Gemini.")
 
-            # Try to find JSON substring if response has extra text
-            start = raw_text.find('[')
-            end = raw_text.rfind(']') + 1
-            if start != -1 and end != 0:
-                json_text = raw_text[start:end]
-            else:
-                raise ValueError(f"No JSON array found in response: {raw_text}")
+            start, end = raw_text.find("["), raw_text.rfind("]") + 1
+            if start == -1 or end <= 0:
+                raise ValueError("No valid JSON array in response.")
+            entities = json.loads(raw_text[start:end])
 
-            entities = json.loads(json_text)
-            print("\n================ MEDICAL ENTITIES FOUND ================")
-            for e in entities:
-                print(f"- Entity: \"{e.get('entity','N/A')}\", Type: {e.get('type','N/A')}")
-            print("========================================================")
-            return entities
+            medicines = []
+            for en in entities:
+                if en.get("type", "").upper() in ["DRUG", "MEDICINE", "MEDICATION", "PHARMACEUTICAL"]:
+                    medicines.append(en.get("entity", "N/A"))
+            
+            suggestion_prompt = f"""
+            You are a clinical pharmacology assistant.
+            Suggest related or alternative medicines for the following list:
+            {', '.join(medicines)}
+            Return output strictly as a JSON list of strings like:
+            ["Ibuprofen", "Cefixime", ...]
+            """
+            suggestion_raw = ""
+            try:
+                suggestion_response = self.model.generate_content(suggestion_prompt)
+                suggestion_raw = getattr(suggestion_response, "text", "").strip()
+                start, end = suggestion_raw.find("["), suggestion_raw.rfind("]") + 1
+                if start == -1 or end <= 0:
+                    raise ValueError("No valid JSON array in suggestion response.")
+                suggested = json.loads(suggestion_raw[start:end])
+            except Exception:
+                print(f"❌ Suggestion Error: {Exception}")
+                suggested = []
+
+            # Store in instance variables
+            self.medicines = medicines  # Extracted from prescription
+            self.suggested_medicines = suggested  # AI-suggested alternatives
+            self.ner_result = entities
+            print(f"✅ Extracted medicines: {medicines}")
+            print(f"✅ Suggested medicines: {suggested}")
+            return (medicines, suggested)
 
         except Exception as e:
-            print(f"❌ Error during NER: {e}")
-            print(f"🧾 Raw model output:\n{raw_text if 'raw_text' in locals() else 'No text returned'}")
-            return []
+            print(f"❌ Medicine extraction error: {e}")
+            self.medicines = []
+            self.suggested_medicines = []
+            self.ner_result = []
+            return ([], [])
 
 
     def run(self):
@@ -323,8 +360,8 @@ class MedicalOCRPipeline:
 # --- Example Usage ---
 if __name__ == "__main__":
     image_path = "WhatsApp Image 2025-10-28 at 17.34.20.jpeg"  # Make sure this file exists in your working directory
-    gcp_key_path = "heroic-dynamo-473510-q9-936d0b6e305a.json"  # Replace with your actual key file
-    gemini_api_key = "AIzaSyAh0g0SF0NFvbhLDiOXPLGp-JhBBvmDS4c"  # Replace with your actual Gemini API key
+    gcp_key_path = "heroic-dynamo-473510-q9-6d66f572235e.json"  # Replace with your actual key file
+    gemini_api_key = "AIzaSyAMcy3qjRdm3q60hjPU2v0BzmuQDxVdvgc"  # Replace with your actual Gemini API key
 
     pipeline = MedicalOCRPipeline(image_path, gcp_key_path, gemini_api_key)
     pipeline.run()

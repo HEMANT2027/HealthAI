@@ -41,9 +41,20 @@ fitz
 
 # Requests (for API calls)
 requests
+
+# LangChain & LangGraph
 langgraph
 langchain
 langchain_openai
 langchain_anthropic
 langchain_text_splitters
 langchain_chroma
+langchain_core
+langchain_google_genai
+langchain-community
+
+biopython
+faiss-cpu
+sentence-transformers
+PyPDF2
+python-docx

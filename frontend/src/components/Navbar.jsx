@@ -60,7 +60,7 @@ function Navbar() {
   return (
     <header className="sticky z-50 bg-white/70 backdrop-blur-md border-b border-gray-200/70">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
-        <Link to="/" className="text-2xl font-extrabold gradient-text">MedicoTourism</Link>
+        <Link to="/" className="text-2xl font-extrabold gradient-text">HealthAI</Link>
         
         <nav className="flex items-center gap-6 text-l font-semibold">
           <NavLink 
@@ -98,7 +98,12 @@ function Navbar() {
               >
                 Doctor Panel
               </NavLink>
-              
+              <NavLink 
+                to="/medchat" 
+                className={({isActive}) => `transition-colors ${isActive ? 'text-vibrant-blue' : 'text-gray-700 hover:text-vibrant-orange'}`}
+              >
+                Medical Rag
+              </NavLink>
             </>
           )}
           
