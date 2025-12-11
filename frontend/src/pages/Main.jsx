@@ -24,7 +24,7 @@ function Main() {
     },
     {
       title: 'Medical Image Analysis',
-      description: 'Analyze pathology images with region-specific insights powered by MedGemma and advanced vision models.',
+      description: 'Analyze pathology images with region-specific insights powered by advanced AI models.',
       icon: (
         <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
@@ -52,13 +52,6 @@ function Main() {
       ),
       gradient: 'from-orange-500 to-red-500'
     },
-  ]
-
-  const models = [
-    { name: 'MedGemma', description: 'Medical-specialized language model for clinical analysis' },
-    { name: 'GPT-4 Vision', description: 'Advanced vision model for medical image interpretation' },
-    { name: 'LangChain RAG', description: 'Retrieval-augmented generation for contextual responses' },
-    { name: 'Custom OCR Pipeline', description: 'Optimized text extraction for medical documents' }
   ]
 
   return (
@@ -321,37 +314,6 @@ function Main() {
                 <p className="text-gray-600 text-sm leading-relaxed">{tool.description}</p>
               </div>
             ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Models Section */}
-      <section className="py-16">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="bg-white/90 backdrop-blur-sm rounded-3xl shadow-xl border border-gray-200 p-8 md:p-12">
-            <div className="text-center mb-10">
-              <h2 className="text-3xl font-bold text-gray-900">Powered by Advanced AI Models</h2>
-              <p className="mt-2 text-gray-600">State-of-the-art machine learning models working together</p>
-            </div>
-
-            <div className="grid md:grid-cols-2 gap-6">
-              {models.map((model, index) => (
-                <div
-                  key={index}
-                  className="flex items-start gap-4 p-5 rounded-xl bg-gradient-to-br from-blue-50 to-teal-50 border border-blue-100 hover:border-vibrant-blue transition-colors"
-                >
-                  <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-vibrant-blue flex items-center justify-center">
-                    <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                    </svg>
-                  </div>
-                  <div>
-                    <h4 className="font-bold text-gray-900">{model.name}</h4>
-                    <p className="text-sm text-gray-600 mt-1">{model.description}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
           </div>
         </div>
       </section>

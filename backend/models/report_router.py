@@ -17,14 +17,13 @@ from endpoints.auth import authMiddleware
 from pymongo import MongoClient
 
 # Import pipelines
-try:
-    from .ocr_ner import MedicalOCRPipeline
-    from .patho import PDFPathologyPipeline
-    from .medgemma import MedGemmaMultiInputClient
-except ImportError:
-    MedicalOCRPipeline = None
-    PDFPathologyPipeline = None
-    MedGemmaMultiInputClient = None
+from .ocr_ner import MedicalOCRPipeline
+from .patho import PDFPathologyPipeline
+from .medgemma import MedGemmaMultiInputClient
+# except ImportError:
+#     MedicalOCRPipeline = None
+#     PDFPathologyPipeline = None
+#     MedGemmaMultiInputClient = None
 
 router = APIRouter(prefix="/report-agent", tags=["Report AGUI Agent"])
 
@@ -35,7 +34,7 @@ form_collection = db["intake_forms"]
 collection = db["ocr_medsam_reports"]
 
 MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
-GCP_KEY_FILE = "heroic-dynamo-473510-q9-936d0b6e305a.json"
+GCP_KEY_FILE = "heroic-dynamo-473510-q9-6d66f572235e.json"
 GCP_KEY_PATH = os.path.join(MODULE_DIR, GCP_KEY_FILE)
 
 
@@ -89,8 +88,8 @@ class EventEncoder:
 # ============================================================
 # Helper Functions
 # ============================================================
-def _run_medical_ocr(image_url: str) -> str:
-    """Run prescription OCR pipeline"""
+def _run_medical_ocr(image_url: str) -> tuple:
+    """Run prescription OCR pipeline and return (text, extracted_medicines, suggested_medicines)"""
     if not MedicalOCRPipeline:
         raise Exception("OCR pipeline not available")
     
@@ -100,7 +99,7 @@ def _run_medical_ocr(image_url: str) -> str:
         gemini_api_key=os.getenv("GEMINI_API_KEY")
     )
     pipeline.run()
-    return pipeline.full_text
+    return pipeline.full_text, pipeline.medicines, pipeline.suggested_medicines
 
 
 def _run_pathology_ocr(pdf_url: str) -> str:
@@ -176,6 +175,8 @@ async def process_intake_streaming(
             pathology_text = ""
             prescription_results = []
             pathology_results = []
+            all_extracted_medicines = []  # Collect extracted medicines from prescriptions
+            all_suggested_medicines = []  # Collect suggested medicines
             
             # ✅ Process Multiple Prescription OCRs (First, with streaming)
             if prescription_files:
@@ -192,16 +193,22 @@ async def process_intake_streaming(
                             "delta": f"\n\n=== Processing Prescription {idx}/{len(prescription_files)}: {prescription_file.get('fileName', 'Unknown')} ===\n\n"
                         })
                         
-                        # Run OCR in thread
-                        file_text = await asyncio.to_thread(
+                        # Run OCR in thread - now returns (text, extracted_medicines, suggested_medicines)
+                        file_text, extracted_meds, suggested_meds = await asyncio.to_thread(
                             _run_medical_ocr,
                             prescription_file.get("url")
                         )
                         
+                        # Collect medicines
+                        all_extracted_medicines.extend(extracted_meds)
+                        all_suggested_medicines.extend(suggested_meds)
+                        
                         prescription_results.append({
                             "file_name": prescription_file.get("fileName", "Unknown"),
                             "file_url": prescription_file.get("url"),
-                            "text": file_text
+                            "text": file_text,
+                            "extracted_medicines": extracted_meds,
+                            "suggested_medicines": suggested_meds
                         })
                         
                         # Stream the result in chunks
@@ -233,11 +240,17 @@ async def process_intake_streaming(
                     for r in prescription_results
                 ])
                 
+                # Remove duplicates from medicines lists
+                unique_extracted = list(dict.fromkeys(all_extracted_medicines))
+                unique_suggested = list(dict.fromkeys(all_suggested_medicines))
+                
                 yield encoder.encode({
                     "type": EventType.PRESCRIPTION_FINISHED,
                     "content": prescription_text,
                     "files_processed": len(prescription_files),
                     "results": prescription_results,
+                    "extracted_medicines": unique_extracted,
+                    "suggested_medicines": unique_suggested,
                     "timestamp": datetime.utcnow().isoformat()
                 })
             
@@ -319,6 +332,10 @@ async def process_intake_streaming(
             })
             
             # ✅ Event: Run Finished
+            # Remove duplicates from final medicines lists
+            unique_extracted = list(dict.fromkeys(all_extracted_medicines))
+            unique_suggested = list(dict.fromkeys(all_suggested_medicines))
+            
             yield encoder.encode({
                 "type": EventType.RUN_FINISHED,
                 "runId": run_id,
@@ -327,9 +344,13 @@ async def process_intake_streaming(
                 "prescription_results": prescription_results,
                 "pathology_results": pathology_results,
                 "scan_images": scan_images,
+                "extracted_medicines": unique_extracted,
+                "suggested_medicines": unique_suggested,
                 "total_prescriptions": len(prescription_files),
                 "total_pathology_reports": len(pathology_files),
                 "total_scans": len(scan_images),
+                "total_extracted_medicines": len(unique_extracted),
+                "total_suggested_medicines": len(unique_suggested),
                 "timestamp": datetime.utcnow().isoformat()
             })
             
@@ -396,8 +417,18 @@ async def analyze_with_medgemma_streaming(
             images = payload.images
             prescription_text = payload.prescription_text
             pathology_text = payload.pathology_text
-            doctor_prompt = payload.doctor_prompt
+            doctor_prompt = """
+            Please analyze the selected regions and summarize clinical findings.
 
+            Explainability Requirements:
+            1. Highlight the key features, regions, or textual cues that influenced your conclusions.
+            2. Provide confidence scores for each major finding.
+            3. Present two levels of explanation:
+                - Clinician-level: detailed medical reasoning suitable for professional review.
+                - Patient-level: simplified explanation in plain language for patient understanding.
+            4. Generate an audit log entry:
+                - Include reasoning steps, confidence values, and identified features for traceability.
+            """ 
             if not images:
                 yield encoder.encode({
                     "type": "error",
@@ -422,7 +453,7 @@ async def analyze_with_medgemma_streaming(
                 "timestamp": datetime.utcnow().isoformat()
             })
 
-            endpoint_name = os.getenv("MEDGEMMA_ENDPOINT") or "jumpstart-dft-hf-vlm-gemma-3-4b-ins-20251031-123610"
+            endpoint_name = os.getenv("MEDGEMMA_ENDPOINT") or "jumpstart-dft-hf-vlm-gemma-3-4b-ins-20251211-073030"
             client = MedGemmaMultiInputClient(endpoint_name=endpoint_name)
 
             image_paths_for_model = []
@@ -591,6 +622,10 @@ async def save_analysis(
             "prescription_ocr": payload.get("prescription_ocr", ""),
             "pathology_ocr": payload.get("pathology_ocr", ""),
             "medgemma_analysis": payload.get("medgemma_analysis") or payload.get("analysis") or "",
+            "extracted_medicines": payload.get("extracted_medicines", []),  # Medicines from prescription
+            "suggested_medicines": payload.get("suggested_medicines", []),  # AI-suggested medicines
+            "suspected": payload.get("suspected", []),  # Suspected conditions
+            "symptoms": payload.get("symptoms", []),    # Symptoms
             "images": payload.get("images", []),
             "meta": payload.get("meta", {}),
             "created_by": current_user.get("email") if current_user else None,

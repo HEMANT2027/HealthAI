@@ -7,6 +7,8 @@ from endpoints.admin import router as admin_router
 from models.report_router import router as report_router
 from chatbot.chat_router import router as chat_router
 from endpoints.recommend import router as tourism_router
+from chatbot.analysis_router import router as analysis_router
+from chatbot.imedrag_router import router as imedrag_router
 import uvicorn
 
 app = FastAPI(title="MedicoTourism API")
@@ -28,6 +30,8 @@ app.include_router(admin_router)
 app.include_router(report_router)
 app.include_router(chat_router)
 app.include_router(tourism_router)
+app.include_router(analysis_router)
+app.include_router(imedrag_router)
 
 @app.get("/")
 def read_root():

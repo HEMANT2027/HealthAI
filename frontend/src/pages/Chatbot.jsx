@@ -1,5 +1,5 @@
 import { useLocation } from "react-router-dom";
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 
 /**
  * AGUI-powered Chatbot Component
@@ -14,19 +14,41 @@ function ChatbotAGUI() {
   
   const [loading, setLoading] = useState(false);
   const [intakeFiles, setIntakeFiles] = useState([]);
+  const [medicines, setMedicines] = useState([]); // Store fetched medicines (combined legacy)
+  const [medicinesExtracted, setMedicinesExtracted] = useState([]); // original extracted
+  const [medicinesSuggested, setMedicinesSuggested] = useState([]); // suggested alternatives
+   const [medicinesLoading, setMedicinesLoading] = useState(true);
   const [messages, setMessages] = useState([
     { 
       role: "assistant", 
       content: "Hello! I'm your medical AI assistant. I can help analyze patient records and answer medical questions.",
-      id: "welcome"
+      id: "welcome",
+      sources: []
     }
   ]);
   const [input, setInput] = useState("");
   const [streamingMessage, setStreamingMessage] = useState("");
   const [isThinking, setIsThinking] = useState(false);
   const [threadId, setThreadId] = useState(null);
+  const [clinicalLoading, setClinicalLoading] = useState(false);
+  const [clinicalResult, setClinicalResult] = useState(null);
+  const [expandedSources, setExpandedSources] = useState({}); // Track which message sources are expanded
   
   const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+
+  // Small spinner component
+  function SmallSpinner({ size = 18 }) {
+    return (
+      <div style={{ display: "inline-block", verticalAlign: "middle" }}>
+        <div style={{
+          width: size, height: size, border: "3px solid #e5e7eb",
+          borderTop: "3px solid #6366f1", borderRadius: "50%",
+          animation: "spin 0.9s linear infinite"
+        }} />
+        <style>{`@keyframes spin { from { transform: rotate(0deg);} to { transform: rotate(360deg);} }`}</style>
+      </div>
+    );
+  }
 
   // Fetch intake form files
   useEffect(() => {
@@ -49,6 +71,46 @@ function ChatbotAGUI() {
     };
 
     fetchIntakeFiles();
+  }, [pseudonym_id]);
+
+  // Fetch medicines from MongoDB
+  useEffect(() => {
+    const fetchMedicines = async () => {
+      if (!pseudonym_id) return;
+      
+      try {
+        setMedicinesLoading(true);
+        const token = localStorage.getItem('token');
+        const response = await fetch(`${API_BASE_URL}/chat/medicines/${pseudonym_id}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+
+        if (!response.ok) throw new Error('Failed to fetch medicines');
+
+        const data = await response.json();
+        // new shape: { success, extracted, suggested, combined }
+        if (data.success) {
+          setMedicinesExtracted(data.extracted || []);
+          setMedicinesSuggested(data.suggested || []);
+          setMedicines(data.combined || (data.extracted || [])); // keep fallback for legacy
+        }
+      } catch (err) {
+        console.error("Failed to fetch medicines:", err);
+        setMedicines([]);
+        setMedicinesExtracted([]);
+        setMedicinesSuggested([]);
+      } finally {
+        setMedicinesLoading(false);
+      }
+    };
+
+    fetchMedicines();
+  }, [pseudonym_id]);
+
+  // Fetch clinical analysis when pseudonym_id changes (no refresh button needed)
+  useEffect(() => {
+    if (!pseudonym_id) return;
+    fetchClinicalAnalysis(pseudonym_id);
   }, [pseudonym_id]);
 
   // Scroll to bottom on new messages
@@ -153,11 +215,12 @@ function ChatbotAGUI() {
               break;
 
             case "text_message_finished":
-              // Add complete assistant message
+              // Add complete assistant message with sources
               const assistantMessage = {
                 role: "assistant",
                 content: event.content || accumulatedContent,
-                id: event.messageId
+                id: event.messageId,
+                sources: event.sources || []
               };
               setMessages(prev => [...prev, assistantMessage]);
               setStreamingMessage("");
@@ -230,6 +293,107 @@ function ChatbotAGUI() {
   const toggleSection = (section) => {
     setExpandedSection(expandedSection === section ? null : section);
   };
+
+  const toggleSources = (messageId) => {
+    setExpandedSources(prev => ({
+      ...prev,
+      [messageId]: !prev[messageId]
+    }));
+  };
+
+  // Format message content with highlighted disclaimer
+  const formatMessageContent = (content) => {
+    // Regex pattern to match various disclaimer phrases
+    // Matches phrases like:
+    // - "this is not a substitute for professional medical advice"
+    // - "this information is not a substitute for professional guidance"
+    // - "not a substitute for professional advice"
+    // etc.
+    const disclaimerPattern = /([^.!?]*(?:this|information|advice)?\s*(?:is\s*)?not\s+(?:a\s+)?substitute\s+for\s+professional\s+(?:medical\s+)?(?:advice|guidance|consultation|care)[^.!?]*[.!?]?)/gi;
+    
+    const parts = [];
+    let lastIndex = 0;
+    let match;
+    
+    // Find all matches
+    while ((match = disclaimerPattern.exec(content)) !== null) {
+      // Add text before the match
+      if (match.index > lastIndex) {
+        parts.push({
+          type: 'text',
+          content: content.substring(lastIndex, match.index)
+        });
+      }
+      
+      // Add the disclaimer match
+      parts.push({
+        type: 'disclaimer',
+        content: match[0]
+      });
+      
+      lastIndex = match.index + match[0].length;
+    }
+    
+    // Add remaining text after last match
+    if (lastIndex < content.length) {
+      parts.push({
+        type: 'text',
+        content: content.substring(lastIndex)
+      });
+    }
+    
+    // If no disclaimers found, return as is
+    if (parts.length === 0) {
+      return <span>{content}</span>;
+    }
+    
+    // Render with formatted disclaimers
+    return (
+      <>
+        {parts.map((part, index) => (
+          <React.Fragment key={index}>
+            {part.type === 'disclaimer' ? (
+              <span className="uppercase text-red-400 font-semibold">
+                {part.content}
+              </span>
+            ) : (
+              <span>{part.content}</span>
+            )}
+          </React.Fragment>
+        ))}
+      </>
+    );
+  };
+
+  // helper to fetch clinical analysis from backend
+  async function fetchClinicalAnalysis(patientId, concise = false) {
+    if (!patientId) return;
+    setClinicalLoading(true);
+    try {
+        const token = localStorage.getItem('token');
+
+        const res = await fetch(`${API_BASE_URL}/analyze/clinical-analyze`, {
+            method: "POST",
+            headers: { 
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${token}`
+            },
+            body: JSON.stringify({ patient_id: patientId, concise }),
+        });
+        if (!res.ok) {
+            const txt = await res.text();
+            throw new Error(txt || `HTTP ${res.status}`);
+        }
+        const payload = await res.json();
+        // payload: { cached: bool, result: { ... } }
+        setClinicalResult(payload.result || null);
+    } catch (err) {
+        console.error("Clinical analysis error:", err);
+        setClinicalResult({ error: err.message || String(err) });
+    } finally {
+        setClinicalLoading(false);
+    }
+}
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-teal-100 via-white to-blue-200 p-4">
@@ -331,36 +495,143 @@ function ChatbotAGUI() {
             
             {expandedSection === 'medications' && (
               <div className="mt-3 space-y-3 pl-2">
-                <div className="border border-purple-200 rounded-xl p-4 bg-purple-50/50 hover:bg-purple-50 transition-colors">
-                  <div className="flex items-start gap-3">
-                    <span className="text-2xl">💊</span>
-                    <div>
-                      <h4 className="font-semibold text-gray-900 text-sm">Aspirin</h4>
-                      <p className="text-sm text-gray-600 mt-1">100mg - Once daily</p>
-                      <p className="text-sm text-gray-500 mt-2">For blood thinning</p>
+                {medicinesLoading ? (
+                  <div className="text-center py-6">
+                    <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-purple-600"></div>
+                    <p className="mt-2 text-sm text-gray-600">Loading medications...</p>
+                  </div>
+                ) : (medicinesExtracted.length === 0 && medicinesSuggested.length === 0) ? (
+                  <div className="border border-purple-200 rounded-xl p-6 bg-purple-50/50 text-center">
+                    <span className="text-4xl mb-2 block">💊</span>
+                    <p className="text-sm font-semibold text-gray-900">No Medications Found</p>
+                  </div>
+                ) : (
+                  <>
+                    {/* Extracted medications */}
+                    {medicinesExtracted.length > 0 && (
+                      <div>
+                        <div className="text-xs font-semibold text-gray-500 mb-2">Extracted</div>
+                        <div className="space-y-2">
+                          {medicinesExtracted.slice(0,5).map((medicine, index) => (
+                            <div
+                              key={`ext-${index}`}
+                              className="border border-purple-200 rounded-xl p-4 bg-purple-50/50 hover:bg-purple-50 transition-colors"
+                            >
+                              <div className="flex items-center gap-3">
+                                <span className="text-2xl">💊</span>
+                                <div className="flex-1 min-w-0">
+                                  <h4 className="font-semibold text-gray-900 text-sm truncate">
+                                    Tab. {medicine}
+                                  </h4>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Suggested medications */}
+                    {medicinesSuggested.length > 0 && (
+                      <div className="pt-3">
+                        <div className="text-xs font-semibold text-gray-500 mb-2">Suggested</div>
+                        <div className="space-y-2">
+                          {medicinesSuggested.slice(0,5).map((medicine, index) => (
+                            <div
+                              key={`sug-${index}`}
+                              className="border border-purple-200 rounded-xl p-4 bg-purple-50/50 hover:bg-purple-50 transition-colors"
+                            >
+                              <div className="flex items-center gap-3">
+                                <span className="text-2xl">💊</span>
+                                <div className="flex-1 min-w-0">
+                                  <h4 className="font-semibold text-gray-900 text-sm truncate">
+                                    Tab. {medicine}
+                                  </h4>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                 )}
+              </div>
+            )}
+          </div>
+
+          {/* Recommendations Section - New (styled similar to others) */}
+          <div className="mb-4">
+            <button
+              onClick={() => toggleSection('recommendations')}
+              className="w-full flex items-center justify-between p-4 bg-gradient-to-r from-green-50 to-emerald-50 hover:from-green-100 hover:to-emerald-100 rounded-xl transition-all border border-green-100"
+            >
+              <div className="flex items-center gap-3">
+                <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6M5 20h14a2 2 0 002-2V8a2 2 0 00-.586-1.414l-6-6A2 2 0 0013.414 0H10.586A2 2 0 008 1.586l-6 6A2 2 0 001 8v10a2 2 0 002 2z" />
+                </svg>
+                <span className="font-semibold text-gray-900 text-base">Recommendations</span>
+              </div>
+              <svg 
+                className={`w-6 h-6 text-gray-600 transition-transform ${expandedSection === 'recommendations' ? 'rotate-180' : ''}`} 
+                fill="none" 
+                stroke="currentColor" 
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            {expandedSection === 'recommendations' && (
+              <div className="mt-3 space-y-3 pl-2">
+                {clinicalLoading ? (
+                  <div className="text-center py-6">
+                    <SmallSpinner size={28} />
+                    <p className="mt-2 text-sm text-gray-600">Fetching recommendations...</p>
+                  </div>
+                ) : !clinicalResult ? (
+                  <div className="border border-green-200 rounded-xl p-6 bg-green-50/50 text-center">
+                    <span className="text-3xl mb-2 block">🩺</span>
+                    <p className="text-sm font-semibold text-gray-900">No Recommendations Yet</p>
+                    <p className="text-xs text-gray-600 mt-1">Clinical analysis will appear here after processing.</p>
+                  </div>
+                ) : clinicalResult.error ? (
+                  <div className="text-sm text-red-600">Error: {clinicalResult.error}</div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="text-sm">
+                      <strong>Suspected conditions:</strong>
+                      <div className="text-gray-700 mt-1 whitespace-pre-wrap">
+                        {Array.isArray(clinicalResult.suspected_conditions)
+                          ? clinicalResult.suspected_conditions.join(", ")
+                          : (clinicalResult.suspected_conditions || "—")}
+                      </div>
+                    </div>
+
+                    <div className="text-sm">
+                      <strong>Symptoms:</strong>
+                      <div className="text-gray-700 mt-1 whitespace-pre-wrap">
+                        {Array.isArray(clinicalResult.symptoms)
+                          ? clinicalResult.symptoms.join(", ")
+                          : (clinicalResult.symptoms || "—")}
+                      </div>
+                    </div>
+
+                    <div className="text-sm">
+                      <strong>Suggested tests:</strong>
+                      <div className="text-gray-700 mt-1 whitespace-pre-wrap">
+                        {clinicalResult.suggest_tests || "—"}
+                      </div>
+                    </div>
+
+                    <div className="text-sm">
+                      <strong>Medication analysis:</strong>
+                      <div className="text-gray-700 mt-1 whitespace-pre-wrap">
+                        {clinicalResult.analyze_medications || "—"}
+                      </div>
                     </div>
                   </div>
-                </div>
-                <div className="border border-purple-200 rounded-xl p-4 bg-purple-50/50 hover:bg-purple-50 transition-colors">
-                  <div className="flex items-start gap-3">
-                    <span className="text-2xl">💊</span>
-                    <div>
-                      <h4 className="font-semibold text-gray-900 text-sm">Metformin</h4>
-                      <p className="text-sm text-gray-600 mt-1">500mg - Twice daily</p>
-                      <p className="text-sm text-gray-500 mt-2">Diabetes management</p>
-                    </div>
-                  </div>
-                </div>
-                <div className="border border-purple-200 rounded-xl p-4 bg-purple-50/50 hover:bg-purple-50 transition-colors">
-                  <div className="flex items-start gap-3">
-                    <span className="text-2xl">💊</span>
-                    <div>
-                      <h4 className="font-semibold text-gray-900 text-sm">Lisinopril</h4>
-                      <p className="text-sm text-gray-600 mt-1">10mg - Once daily</p>
-                      <p className="text-sm text-gray-500 mt-2">Blood pressure control</p>
-                    </div>
-                  </div>
-                </div>
+                )}
               </div>
             )}
           </div>
@@ -368,6 +639,15 @@ function ChatbotAGUI() {
 
         {/* Chat area - Much Wider with Better Font */}
         <div className="col-span-9 bg-white rounded-2xl shadow-lg p-6 h-[90vh] flex flex-col" style={{fontFamily: "'Inter', 'Segoe UI', 'Roboto', sans-serif"}}>
+          <style>{`
+            @keyframes fadeIn {
+              from { opacity: 0; transform: translateY(-10px); }
+              to { opacity: 1; transform: translateY(0); }
+            }
+            .animate-fadeIn {
+              animation: fadeIn 0.3s ease-out;
+            }
+          `}</style>
           <div className="flex-1 overflow-y-auto mb-4 space-y-5 px-2">
             {messages.map((msg) => (
               <div
@@ -384,7 +664,80 @@ function ChatbotAGUI() {
                   <div className={`text-sm font-semibold mb-2 ${msg.role === "user" ? "text-blue-100" : "text-gray-600"}`}>
                     {msg.role === "user" ? "You" : "AI Assistant"}
                   </div>
-                  <div className="whitespace-pre-wrap text-base leading-relaxed">{msg.content}</div>
+                  <div className="whitespace-pre-wrap text-base leading-relaxed">
+                    {msg.role === "assistant" ? formatMessageContent(msg.content) : msg.content}
+                  </div>
+                  
+                  {/* Sources Section - Collapsible Dropdown */}
+                  {msg.role === "assistant" && msg.sources && msg.sources.length > 0 && (
+                    <div className="mt-4 pt-4 border-t border-gray-200">
+                      <button
+                        onClick={() => toggleSources(msg.id)}
+                        className="w-full flex items-center justify-between text-xs font-semibold text-gray-600 hover:text-gray-900 transition-colors py-2 px-3 rounded-lg hover:bg-gray-50"
+                      >
+                        <div className="flex items-center gap-2">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          <span>Sources ({msg.sources.length})</span>
+                        </div>
+                        <svg 
+                          className={`w-4 h-4 transition-transform ${expandedSources[msg.id] ? 'rotate-180' : ''}`}
+                          fill="none" 
+                          stroke="currentColor" 
+                          viewBox="0 0 24 24"
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </button>
+                      
+                      {expandedSources[msg.id] && (
+                        <div className="space-y-2 mt-3 animate-fadeIn">
+                          {msg.sources.map((source, idx) => (
+                            <a
+                              key={idx}
+                              href={source.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="block p-3 bg-white rounded-lg border border-gray-200 hover:border-blue-300 hover:shadow-sm transition-all group"
+                            >
+                              <div className="flex items-start gap-2">
+                                <div className="flex-shrink-0 mt-0.5">
+                                  {source.type === 'pubmed' ? (
+                                    <span className="text-lg">📚</span>
+                                  ) : (
+                                    <span className="text-lg">🌐</span>
+                                  )}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-sm font-medium text-gray-900 group-hover:text-blue-600 line-clamp-2">
+                                    {source.title}
+                                  </div>
+                                  {source.type === 'pubmed' && (
+                                    <div className="text-xs text-gray-500 mt-1">
+                                      {source.authors && source.authors.length > 0 && (
+                                        <span>{source.authors.slice(0, 2).join(', ')}{source.authors.length > 2 ? ' et al.' : ''}</span>
+                                      )}
+                                      {source.year && <span> • {source.year}</span>}
+                                      {source.journal && <span> • {source.journal}</span>}
+                                    </div>
+                                  )}
+                                  {source.type === 'web' && source.snippet && (
+                                    <div className="text-xs text-gray-500 mt-1 line-clamp-2">
+                                      {source.snippet}
+                                    </div>
+                                  )}
+                                </div>
+                                <svg className="w-4 h-4 text-gray-400 group-hover:text-blue-600 flex-shrink-0 mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                </svg>
+                              </div>
+                            </a>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
@@ -417,7 +770,6 @@ function ChatbotAGUI() {
                       <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" style={{ animationDelay: '200ms' }}></span>
                       <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" style={{ animationDelay: '400ms' }}></span>
                     </div>
-                    <span>Streaming...</span>
                   </div>
                 </div>
               </div>

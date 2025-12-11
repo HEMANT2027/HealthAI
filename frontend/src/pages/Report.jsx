@@ -47,6 +47,8 @@ function ReportAGUI() {
   const [step, setStep] = useState(0);
   const [prescriptionOCR, setPrescriptionOCR] = useState("");
   const [pathologyOCR, setPathologyOCR] = useState("");
+  const [extractedMedicines, setExtractedMedicines] = useState([]); // Medicines from prescription
+  const [suggestedMedicines, setSuggestedMedicines] = useState([]); // AI-suggested medicines
   const [streamingPrescription, setStreamingPrescription] = useState("");
   const [streamingPathology, setStreamingPathology] = useState("");
   const [isPrescriptionLoading, setIsPrescriptionLoading] = useState(false);
@@ -150,6 +152,13 @@ function ReportAGUI() {
                 setStreamingPrescription("");
                 setIsPrescriptionLoading(false);
                 setLoading(false); // Show UI after prescription is done
+                // Store both types of medicines if available
+                if (event.extracted_medicines && Array.isArray(event.extracted_medicines)) {
+                  setExtractedMedicines(event.extracted_medicines);
+                }
+                if (event.suggested_medicines && Array.isArray(event.suggested_medicines)) {
+                  setSuggestedMedicines(event.suggested_medicines);
+                }
                 break;
 
               case "pathology_started":
@@ -183,6 +192,13 @@ function ReportAGUI() {
 
               case "run_finished":
                 setInitialLoadComplete(true);
+                // Also capture medicines from run_finished event if not already set
+                if (event.extracted_medicines && Array.isArray(event.extracted_medicines) && extractedMedicines.length === 0) {
+                  setExtractedMedicines(event.extracted_medicines);
+                }
+                if (event.suggested_medicines && Array.isArray(event.suggested_medicines) && suggestedMedicines.length === 0) {
+                  setSuggestedMedicines(event.suggested_medicines);
+                }
                 break;
 
               case "error":
@@ -409,7 +425,6 @@ function ReportAGUI() {
       images,
       prescription_text: prescriptionOCR || "",
       pathology_text: pathologyOCR || "",
-      doctor_prompt: "Please analyze the selected regions and summarize clinical findings.",
     };
   };
 
@@ -517,6 +532,8 @@ function ReportAGUI() {
         prescription_ocr: prescriptionOCR,
         pathology_ocr: pathologyOCR,
         medgemma_analysis: overallReport,
+        extracted_medicines: extractedMedicines, // Medicines from prescription
+        suggested_medicines: suggestedMedicines, // AI-suggested medicines
         images: sampleImages.map(img => ({
           url: img.url,
           name: img.name,
@@ -662,7 +679,19 @@ function ReportAGUI() {
                       <p className="text-sm text-gray-600">Mark regions of interest on the medical scans</p>
                     </div>
 
-                    <div className="w-full flex items-center justify-between bg-gray-50 p-4 rounded-lg">
+                    {sampleImages.length === 0 || !currentImage?.url ? (
+                      <div className="w-full flex flex-col items-center justify-center py-20 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
+                        <svg className="w-16 h-16 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                        <h3 className="text-lg font-semibold text-gray-700 mb-2">No Scans Available</h3>
+                        <p className="text-sm text-gray-500 text-center max-w-md">
+                          No medical scan images have been uploaded for this patient. Please upload scan images in the intake form to enable region selection.
+                        </p>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="w-full flex items-center justify-between bg-gray-50 p-4 rounded-lg">
                       <div className="flex items-center gap-3">
                         <button
                           onClick={() => setCurrentImageIndex((prev) => Math.max(0, prev - 1))}
@@ -731,9 +760,11 @@ function ReportAGUI() {
                       />
                     </div>
 
-                    <p className="text-xs text-gray-500 text-center">
-                      💡 Click and drag to select regions of interest on the scan
-                    </p>
+                        <p className="text-xs text-gray-500 text-center">
+                          💡 Click and drag to select regions of interest on the scan
+                        </p>
+                      </>
+                    )}
                   </div>
                 )}
 
@@ -743,29 +774,6 @@ function ReportAGUI() {
                       <h2 className="text-xl font-bold text-gray-900 mb-2">📄 Comprehensive Medical Report</h2>
                       <p className="text-sm text-gray-600">Complete analysis combining all medical data</p>
                     </div>
-                    
-                    {analysisLoading && (
-                      <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg">
-                        <div className="flex flex-col gap-3">
-                          <div className="flex items-center gap-3">
-                            <div className="flex gap-1">
-                              <span className="w-2 h-2 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
-                              <span className="w-2 h-2 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
-                              <span className="w-2 h-2 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
-                            </div>
-                            <span className="text-sm text-green-700">{analysisMessage || "Analyzing images with MedGemma..."}</span>
-                          </div>
-                          {analysisProgress > 0 && (
-                            <div className="w-full bg-green-200 rounded-full h-2">
-                              <div 
-                                className="bg-green-600 h-2 rounded-full transition-all duration-300"
-                                style={{ width: `${analysisProgress}%` }}
-                              ></div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
 
                     <textarea
                       value={streamingAnalysis || overallReport}

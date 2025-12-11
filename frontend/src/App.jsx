@@ -12,6 +12,7 @@ import Chatbot from './pages/Chatbot'
 import  AdminDashboard  from './pages/Admindashboard'
 import PatientForm from './pages/CreatePatient'
 import Main from './pages/Main'
+import IMedRagChat from './pages/IMedRagChat'
 // Protected Route Component
 function ProtectedRoute({ children, allowedRoles }) {
   const token = localStorage.getItem('token')
@@ -118,8 +119,7 @@ function App() {
     <Router>
       <Routes>
         <Route element={<Layout />}>
-          <Route path="/" element={<Home />} />
-          <Route path="/home" element={<Main />} />
+          <Route path="/" element={<Main />} />
           {/* Patient Only Routes */}
           <Route 
             path="/intake" 
@@ -152,6 +152,14 @@ function App() {
                 element={
                   <ProtectedRoute allowedRoles={['doctor']}>
                   <PatientForm />
+                  </ProtectedRoute>
+                } 
+                />
+                <Route 
+                path="/medchat" 
+                element={
+                  <ProtectedRoute allowedRoles={['doctor']}>
+                  <IMedRagChat />
                   </ProtectedRoute>
                 } 
                 />

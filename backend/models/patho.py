@@ -2,7 +2,7 @@ import os
 import io
 import tempfile
 import requests
-import fitz
+import pymupdf as fitz
 import json
 from google.cloud import vision
 import google.generativeai as genai
@@ -90,7 +90,7 @@ class PDFPathologyPipeline:
             return [pdf_path]
 
         try:
-            doc = fitz.open(pdf_path)
+            doc = fitz.Document(pdf_path)
         except Exception as e:
             raise RuntimeError(f"❌ Could not open PDF '{pdf_path}': {e}")
 

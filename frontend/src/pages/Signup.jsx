@@ -114,7 +114,7 @@ function Signup() {
                   to="/"
                   className="text-teal-300 hover:text-vibrant-orange transition-colors duration-300 underline-offset-4 hover:underline"
                 >
-                  MedicoTourism
+                  HealthAI
                 </Link>{' '}
                 Today
               </h1>

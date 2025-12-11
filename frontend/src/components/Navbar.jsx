@@ -98,7 +98,12 @@ function Navbar() {
               >
                 Doctor Panel
               </NavLink>
-              
+              <NavLink 
+                to="/medchat" 
+                className={({isActive}) => `transition-colors ${isActive ? 'text-vibrant-blue' : 'text-gray-700 hover:text-vibrant-orange'}`}
+              >
+                Medical Rag
+              </NavLink>
             </>
           )}
           
