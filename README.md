@@ -1,4 +1,4 @@
-# 🏥 MedicoTourism - Medical AI Assistant Platform
+# 🏥 Health-AI - Medical AI Assistant Platform
 
 A comprehensive medical assistance platform that combines AI-powered document processing, medical chatbots, and patient management systems for healthcare professionals.
 
