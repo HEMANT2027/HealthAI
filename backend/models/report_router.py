@@ -20,10 +20,7 @@ from pymongo import MongoClient
 from .ocr_ner import MedicalOCRPipeline
 from .patho import PDFPathologyPipeline
 from .medgemma import MedGemmaMultiInputClient
-# except ImportError:
-#     MedicalOCRPipeline = None
-#     PDFPathologyPipeline = None
-#     MedGemmaMultiInputClient = None
+from .medpipeline import MainPipeline
 
 router = APIRouter(prefix="/report-agent", tags=["Report AGUI Agent"])
 
@@ -89,18 +86,24 @@ class EventEncoder:
 # Helper Functions
 # ============================================================
 def _run_medical_ocr(image_url: str) -> tuple:
-    """Run prescription OCR pipeline and return (text, extracted_medicines, suggested_medicines)"""
+    """Run prescription OCR pipeline and return (text, extracted_medicines, suggested_medicines, ddi_results, pubmed_docs)"""
     if not MedicalOCRPipeline:
         raise Exception("OCR pipeline not available")
     
-    pipeline = MedicalOCRPipeline(
-        image_path=image_url,
-        gcp_key_path=GCP_KEY_PATH,
-        gemini_api_key=os.getenv("GEMINI_API_KEY")
+    pipeline = MainPipeline(
+        gcp_key=GCP_KEY_PATH,
+        gemini_key=os.getenv("GEMINI_API_KEY")
     )
-    pipeline.run()
-    return pipeline.full_text, pipeline.medicines, pipeline.suggested_medicines
 
+    result = pipeline.run(image_url)
+    
+    ocr_text = result.get("ocr_text", "")
+    extracted_medicines = result.get("extracted", [])
+    suggested_medicines = result.get("suggested", [])
+    ddi_results = result.get("interactions", [])
+    pubmed_docs = result.get("pubmed_docs", [])
+    
+    return ocr_text, extracted_medicines, suggested_medicines, ddi_results, pubmed_docs
 
 def _run_pathology_ocr(pdf_url: str) -> str:
     """Run pathology OCR pipeline"""
@@ -177,6 +180,8 @@ async def process_intake_streaming(
             pathology_results = []
             all_extracted_medicines = []  # Collect extracted medicines from prescriptions
             all_suggested_medicines = []  # Collect suggested medicines
+            all_ddi_results = []  # Collect DDI results
+            all_pubmed_docs = []  # Collect PubMed documents
             
             # ✅ Process Multiple Prescription OCRs (First, with streaming)
             if prescription_files:
@@ -193,22 +198,26 @@ async def process_intake_streaming(
                             "delta": f"\n\n=== Processing Prescription {idx}/{len(prescription_files)}: {prescription_file.get('fileName', 'Unknown')} ===\n\n"
                         })
                         
-                        # Run OCR in thread - now returns (text, extracted_medicines, suggested_medicines)
-                        file_text, extracted_meds, suggested_meds = await asyncio.to_thread(
+                        # Run OCR in thread - now returns (text, extracted_medicines, suggested_medicines, ddi_results, pubmed_docs)
+                        file_text, extracted_meds, suggested_meds, ddi_results, pubmed_docs = await asyncio.to_thread(
                             _run_medical_ocr,
                             prescription_file.get("url")
                         )
                         
-                        # Collect medicines
+                        # Collect medicines and results
                         all_extracted_medicines.extend(extracted_meds)
                         all_suggested_medicines.extend(suggested_meds)
+                        all_ddi_results.extend(ddi_results)
+                        all_pubmed_docs.extend(pubmed_docs)
                         
                         prescription_results.append({
                             "file_name": prescription_file.get("fileName", "Unknown"),
                             "file_url": prescription_file.get("url"),
                             "text": file_text,
                             "extracted_medicines": extracted_meds,
-                            "suggested_medicines": suggested_meds
+                            "suggested_medicines": suggested_meds,
+                            "ddi_results": ddi_results,
+                            "pubmed_docs": pubmed_docs
                         })
                         
                         # Stream the result in chunks
@@ -251,9 +260,35 @@ async def process_intake_streaming(
                     "results": prescription_results,
                     "extracted_medicines": unique_extracted,
                     "suggested_medicines": unique_suggested,
+                    "ddi_results": all_ddi_results,
+                    "pubmed_docs": all_pubmed_docs,
                     "timestamp": datetime.utcnow().isoformat()
                 })
             
+            else:
+                yield encoder.encode({
+                    "type": EventType.PRESCRIPTION_STARTED,
+                    "total_files": 0,
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+    
+                no_prescription_msg = "No prescription has been added for this patient."
+    
+                yield encoder.encode({
+                    "type": EventType.PRESCRIPTION_CHUNK,
+                    "delta": no_prescription_msg
+                })
+    
+                yield encoder.encode({
+                    "type": EventType.PRESCRIPTION_FINISHED,
+                    "content": no_prescription_msg,
+                    "files_processed": 0,
+                    "results": [],
+                    "extracted_medicines": [],
+                    "suggested_medicines": [],
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+
             # ✅ Process Multiple Pathology OCRs (Second, with streaming)
             if pathology_files:
                 yield encoder.encode({
@@ -346,11 +381,15 @@ async def process_intake_streaming(
                 "scan_images": scan_images,
                 "extracted_medicines": unique_extracted,
                 "suggested_medicines": unique_suggested,
+                "ddi_results": all_ddi_results,
+                "pubmed_docs": all_pubmed_docs,
                 "total_prescriptions": len(prescription_files),
                 "total_pathology_reports": len(pathology_files),
                 "total_scans": len(scan_images),
                 "total_extracted_medicines": len(unique_extracted),
                 "total_suggested_medicines": len(unique_suggested),
+                "total_ddi_interactions": len(all_ddi_results),
+                "total_pubmed_docs": len(all_pubmed_docs),
                 "timestamp": datetime.utcnow().isoformat()
             })
             
@@ -429,13 +468,6 @@ async def analyze_with_medgemma_streaming(
             4. Generate an audit log entry:
                 - Include reasoning steps, confidence values, and identified features for traceability.
             """ 
-            if not images:
-                yield encoder.encode({
-                    "type": "error",
-                    "error": "No images provided",
-                    "timestamp": datetime.utcnow().isoformat()
-                })
-                return
 
             if not MedGemmaMultiInputClient:
                 yield encoder.encode({
@@ -514,14 +546,6 @@ async def analyze_with_medgemma_streaming(
                 else:
                     image_paths_for_model.append(tmp_orig.name)
 
-            if not image_paths_for_model:
-                yield encoder.encode({
-                    "type": "error",
-                    "error": "No valid image pages/regions available to analyze",
-                    "timestamp": datetime.utcnow().isoformat()
-                })
-                return
-
             # ✅ Event 3: Progress - Building payload
             yield encoder.encode({
                 "type": "analysis_progress",
@@ -532,7 +556,7 @@ async def analyze_with_medgemma_streaming(
 
             # Build payload and invoke MedGemma
             payload_for_model = client.build_payload(
-                system_prompt="You are a helpful medical assistant",
+                system_prompt="You are a helpful medical assistant.Make sure that you do not reveal/write the name of the patient in the output in any case.",
                 doctor_prompt=doctor_prompt,
                 prescription_text=prescription_text,
                 pathology_text=pathology_text,

@@ -183,12 +183,10 @@ function IMedRagChat() {
 
           switch (event.type) {
             case "run_started":
-              console.log("📡 run_started event received");
               setIsThinking(true);
               break;
 
             case "text_message_started":
-              console.log("📝 text_message_started event received - stopping thinking animation");
               currentMessageId = event.messageId;
               accumulatedContent = "";
               setIsThinking(false);

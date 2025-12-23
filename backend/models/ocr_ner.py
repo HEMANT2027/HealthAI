@@ -236,7 +236,7 @@ class MedicalOCRPipeline:
         Extract all medically relevant entities (diseases, symptoms, drugs, tests, anatomy, etc.)
         Return output strictly as a JSON list like:
         [{{"entity": "Hypertension", "type": "DISEASE"}}, ...]
-        
+                
         Text:
         ---
         {self.full_text}
@@ -266,16 +266,43 @@ class MedicalOCRPipeline:
             ["Ibuprofen", "Cefixime", ...]
             """
             suggestion_raw = ""
-            try:
-                suggestion_response = self.model.generate_content(suggestion_prompt)
-                suggestion_raw = getattr(suggestion_response, "text", "").strip()
-                start, end = suggestion_raw.find("["), suggestion_raw.rfind("]") + 1
-                if start == -1 or end <= 0:
-                    raise ValueError("No valid JSON array in suggestion response.")
-                suggested = json.loads(suggestion_raw[start:end])
-            except Exception:
-                print(f"❌ Suggestion Error: {Exception}")
-                suggested = []
+            suggested = []
+            max_retries = 2
+            
+            for attempt in range(max_retries):
+                try:
+                    print(f"🔄 Attempting to get medicine suggestions (attempt {attempt + 1}/{max_retries})...")
+                    suggestion_response = self.model.generate_content(suggestion_prompt)
+                    suggestion_raw = getattr(suggestion_response, "text", "").strip()
+                    start, end = suggestion_raw.find("["), suggestion_raw.rfind("]") + 1
+                    if start == -1 or end <= 0:
+                        raise ValueError("No valid JSON array in suggestion response.")
+                    suggested = json.loads(suggestion_raw[start:end])
+                    
+                    # Check if we got valid suggestions
+                    if suggested and len(suggested) > 0:
+                        print(f"✅ Successfully got {len(suggested)} medicine suggestions")
+                        break
+                    else:
+                        print(f"⚠️ Empty suggestions list on attempt {attempt + 1}")
+                        if attempt < max_retries - 1:
+                            print("🔄 Retrying with enhanced prompt...")
+                            # Enhanced prompt for retry
+                            suggestion_prompt = f"""
+            You are a clinical pharmacology assistant.
+            Suggest related or alternative medicines for the following list:
+            {', '.join(medicines)}
+            Return output strictly as a JSON list of strings like:
+            ["Ibuprofen", "Cefixime", ...]
+                            """
+                        
+                except Exception as e:
+                    print(f"❌ Suggestion Error on attempt {attempt + 1}: {e}")
+                    if attempt < max_retries - 1:
+                        print("🔄 Retrying...")
+                    else:
+                        print("❌ All retry attempts failed")
+                        suggested = []
 
             # Store in instance variables
             self.medicines = medicines  # Extracted from prescription
@@ -356,12 +383,3 @@ class MedicalOCRPipeline:
                     os.remove(self._temp_downloaded)
             except Exception:
                 pass
-
-# --- Example Usage ---
-if __name__ == "__main__":
-    image_path = "WhatsApp Image 2025-10-28 at 17.34.20.jpeg"  # Make sure this file exists in your working directory
-    gcp_key_path = "heroic-dynamo-473510-q9-6d66f572235e.json"  # Replace with your actual key file
-    gemini_api_key = "AIzaSyAMcy3qjRdm3q60hjPU2v0BzmuQDxVdvgc"  # Replace with your actual Gemini API key
-
-    pipeline = MedicalOCRPipeline(image_path, gcp_key_path, gemini_api_key)
-    pipeline.run()

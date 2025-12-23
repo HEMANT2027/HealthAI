@@ -390,18 +390,19 @@ async def agent_endpoint(
             # Method 2: Parse from tool_output
             if not sources and isinstance(result, dict):
                 tool_output = result.get('tool_output')
-                print(f"🔧 Tool output type: {type(tool_output)}")
-                
-                if(tool_output.get("tool") == "pubmed_search"):
-                    raw_results = tool_output.get("raw", [])
+                raw = tool_output.get("raw") if tool_output else None
+
+                if isinstance(raw, list):
+                # Case 1: raw is directly a list of results
+                    raw_results = raw
                     print(f"📚 Parsing {len(raw_results)} PubMed results")
                     for item in raw_results:
                         sources.append({
                             "title": item.get("title", ""),
                             "url": item.get("url", ""),
                         })
-                elif (tool_output.get("tool") == "medical_web_search"):
-                    raw = tool_output.get("raw", [])
+                elif isinstance(raw, dict) and "results" in raw:
+                # Case 2: raw is a dict containing results list
                     raw_results = raw.get("results", [])
                     print(f"📚 Parsing {len(raw_results)} PubMed results")
                     for item in raw_results:
