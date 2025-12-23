@@ -450,8 +450,7 @@ Structured tool output:
 
 Now, write a concise answer for the user:
 - First, answer their question as well as you can from the context.
-- Then, briefly mention (in plain language) how you used the tools.
-- Finally, include a short disclaimer that this is not a substitute for professional medical advice.
+- Finally, include this exact disclaimer: "Please remember, this information is not a substitute for professional medical advice. As a qualified doctor, please verify this information and apply your clinical judgment.
 """
 
     try:

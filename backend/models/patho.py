@@ -183,12 +183,3 @@ Text:
                     os.remove(self._temp_downloaded)
             except Exception:
                 pass
-
-
-if __name__ == "__main__":
-    pipeline = PDFPathologyPipeline(
-        pdf_path="sample_pathology_report1.pdf",
-        gcp_key_path="heroic-dynamo-473510-q9-936d0b6e305a.json",
-        gemini_api_key="AIzaSyAh0g0SF0NFvbhLDiOXPLGp-JhBBvmDS4c"
-    )
-    pipeline.run()
